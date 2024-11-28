@@ -1,3 +1,12 @@
+## [1.0.1](https://github.com/yamadharma/desire/compare/v1.0.0...v1.0.1) (2024-11-28)
+
+
+### Features
+
+* **desire:** rename desire-old to desire-conf ([ed34168](https://github.com/yamadharma/desire/commit/ed341686ba6ec7855ceb3c7e72279d87ceb7c473))
+
+
+
 # 1.0.0 (2024-07-26)
 
 

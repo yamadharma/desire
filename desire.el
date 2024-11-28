@@ -3,14 +3,14 @@
 
 ;; Authors:         Martin Schwenke <martin@meltin.net>
 ;;                  Graham Williams <Graham.Williams@cmis.csiro.au>
-;;		    Dmitry S. Kulyabov <yamadharma@gmail.com> <dharma@sci.pfu.edu.ru>
+;;		    Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Maintainer:      Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Created:         20-Jun-1995
 
 ;; Keywords: setup configuration
 
-;; Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2001 Martin Schwenke and Graham Williams
-;; Copyright (C) 2002-2021 Dmitry S. Kulyabov
+;; Copyright (C) 1995-2001 Martin Schwenke and Graham Williams
+;; Copyright (C) 2002-2024 Dmitry S. Kulyabov
 
 ;; This file is NOT part of GNU Emacs.  It is, however, distributed
 ;; under the same conditions as GNU Emacs, which are as follows:
@@ -128,7 +128,7 @@ The function `desired' will add an item to this list.")
 	     (prin1-to-string package)))))
     (and (member p desirable) t)))
 
-(defun desire-old (package &optional fname precond autoinstall)
+(defun desire-conf (package &optional fname precond autoinstall)
 "Arrange loading and configuration of a desired emacs PACKAGE.
 PACKAGE is a symbol representing the name of a package.  The aim is to
 set up some autoloads and other initial configuration, and possibly
