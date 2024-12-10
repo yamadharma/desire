@@ -74,6 +74,60 @@ The function `desired' will add an item to this list.")
 (defvar desire-precondition nil
   "*Precondition for package loading.")
 
+;;; package-vc backend
+(defvar desire-vc-keywords
+  '(:fetcher :repo :rev :backend)
+  "All arguments that `package-vc-install' supports.")
+
+(defconst desire-vc-fetchers
+  '(:github "https://github.com/"
+    :gitlab "https://gitlab.com/"
+    :codeberg "https://codeberg.org/"
+    :sourcehut "https://git.sr.ht/~")
+  "Places from where to fetch packages.")
+
+;; (cl-defun desire-vc--install (&key verbatim fetcher repo name rev backend)
+;;   "Thin wrapper around `package-vc-install'.
+;; This exists so we can have sane keywords arguments, yet don't
+;; have to go overboard when normalising."
+;;   (if verbatim
+;;       (package-vc-install verbatim)
+;;     (package-vc-install (concat fetcher repo) rev backend name)))
+
+(defun desire-vc--check-fetcher (val)
+  "Check whether VAL is a correct `:fetcher' argument.
+More specifically, check if it's (i) URL or (ii) either a string
+or a symbol representing one possible destination in
+`vc-use-package-keywords'."
+  (cond
+   ((string-prefix-p "https://" val) val)
+   ((plist-get desire-vc-fetchers (intern (concat ":" val))))
+   (t (use-package-error
+       (format ":fetcher is not a url or one of %s."
+               (mapcar #'car desire-vc-fetchers))))))
+
+(defun desire-vc--normalise-args (args)
+  "Normalise the plist for vc-recipe."
+  (cl-flet* ((mk-string (s)
+               (if (stringp s) s (symbol-name s)))
+             (normalise (arg val)
+               (pcase arg
+                 (:fetcher (desire-vc--check-fetcher (mk-string val)))
+                 (:rev (if (eq val :last-release) val (mk-string val)))
+                 (:repo (mk-string val))
+                 (_ val))))
+    (cl-loop for (k v) on args by #'cddr
+             nconc (list k (normalise k v)))))
+
+;; (defun desire-vc--recipe-format (args)
+;;   "Convert to package-vc format"
+;;   desire-vc--normalise-args args
+;;   )
+
+;;; }}}
+
+
+
 ;; (defun desired (package &optional fname precond)
 (cl-defun desired (package
 		  &key precondition-lisp-library precondition-system-executable)
@@ -342,13 +396,30 @@ then nothing happens and nil is returned."
 ;; Use recipe for straight.el
 (setq straight-recipe nil)
 (if recipe
-    (setq straight-recipe (cons package recipe))
+    (progn
+      (setq straight-recipe (cons package recipe))
+      ;;; vc-recipe
+      (setq desire-vc-plist (desire-vc--normalise-args recipe))
+      (setq vc-recipe-url (concat (plist-get desire-vc-plist ':fetcher) (plist-get desire-vc-plist ':repo)))
+      (setq vc-recipe nil)
+      (setq vc-recipe (plist-put vc-recipe ':url vc-recipe-url))
+      (if (plist-member desire-vc-plist ':branch)
+	  (progn
+	    (setq vc-recipe-branch (plist-get desire-vc-plist ':branch))
+	    (setq vc-recipe (plist-put vc-recipe ':branch vc-recipe-branch)))
+	nil)
+      (setq vc-recipe (cons package vc-recipe))
+      )
   nil)
 
 ;; (when (and recipe (keywordp (car-safe recipe)))
 ;;   (plist-put! plist :recipe `(quote ,recipe)))
-
-(message "recipe: %s ; %s ; recipe =  %s" package recipe straight-recipe)
+(if recipe
+    (progn      
+      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe =  %s" package recipe straight-recipe)
+      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe =  %s" package recipe vc-recipe)
+      )
+  nil)
 
 ;; Check ensure key
 (if ensure
@@ -676,7 +747,8 @@ is the directory name with the prefix directory and extension removed."
 	;; Straight hasn't been fully configured by this point.
 	;; (straight-use-package straight-recipe nil t)
 	;; (straight-use-package straight-recipe)
-	(quelpa straight-recipe)      
+	;; (quelpa straight-recipe)
+	(package-vc-install vc-recipe)
       (progn
 	(package-refresh-contents)
 	(package-install package))
