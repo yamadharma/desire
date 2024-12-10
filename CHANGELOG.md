@@ -1,3 +1,12 @@
+## [1.0.2](https://github.com/yamadharma/desire/compare/v1.0.1...v1.0.2) (2024-12-10)
+
+
+### Features
+
+* **desire:** add support package-install-vc ([8ff9131](https://github.com/yamadharma/desire/commit/8ff91310170d8ea71f3d31444a0855e375e97fdc))
+
+
+
 ## [1.0.1](https://github.com/yamadharma/desire/compare/v1.0.0...v1.0.1) (2024-11-28)
 
 
