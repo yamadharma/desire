@@ -10,7 +10,7 @@
 ;; Keywords: setup configuration
 
 ;; Copyright (C) 1995-2001 Martin Schwenke and Graham Williams
-;; Copyright (C) 2002-2024 Dmitry S. Kulyabov
+;; Copyright (C) 2002-2025 Dmitry S. Kulyabov
 
 ;; This file is NOT part of GNU Emacs.  It is, however, distributed
 ;; under the same conditions as GNU Emacs, which are as follows:
@@ -31,7 +31,7 @@
 
 (require 'cl-lib)
 (require 'desire-core-lib)
-;; (require 'desire-core-packages)
+(require 'desire-core-packages)
 
 (defvar desire-load-path nil
   "*List of directories to be searched by `desire' for configuration data.")
@@ -104,20 +104,20 @@ or a symbol representing one possible destination in
    ((plist-get desire-vc-fetchers (intern (concat ":" val))))
    (t (use-package-error
        (format ":fetcher is not a url or one of %s."
-               (mapcar #'car desire-vc-fetchers))))))
+	       (mapcar #'car desire-vc-fetchers))))))
 
 (defun desire-vc--normalise-args (args)
   "Normalise the plist for vc-recipe."
   (cl-flet* ((mk-string (s)
-               (if (stringp s) s (symbol-name s)))
-             (normalise (arg val)
-               (pcase arg
-                 (:fetcher (desire-vc--check-fetcher (mk-string val)))
-                 (:rev (if (eq val :last-release) val (mk-string val)))
-                 (:repo (mk-string val))
-                 (_ val))))
+	       (if (stringp s) s (symbol-name s)))
+	     (normalise (arg val)
+	       (pcase arg
+		 (:fetcher (desire-vc--check-fetcher (mk-string val)))
+		 (:rev (if (eq val :last-release) val (mk-string val)))
+		 (:repo (mk-string val))
+		 (_ val))))
     (cl-loop for (k v) on args by #'cddr
-             nconc (list k (normalise k v)))))
+	     nconc (list k (normalise k v)))))
 
 ;; (defun desire-vc--recipe-format (args)
 ;;   "Convert to package-vc format"
@@ -142,18 +142,18 @@ or a symbol representing one possible destination in
       (error "Wrong type argument to `desired': symbolp, %s"
 	     (prin1-to-string package))
       )
-  
+
   ;; Message: found executable precondition
   (if precondition-system-executable
       (if (executable-find precondition-system-executable)
-	  (message "Executable file found %s to load package %s" 
+	  (message "Executable file found %s to load package %s"
 		   (prin1-to-string precondition-system-executable)
 		   (prin1-to-string package))
 	(message "Cannot find executable %s to load package %s"
 		 (prin1-to-string precondition-system-executable)
 		 (prin1-to-string package)))
     nil)
-  
+
   ;; Check precondition
   (if (and
        (not (desiredp package))
@@ -319,12 +319,12 @@ then nothing happens and nil is returned."
 ) ; end defun desire
 
 (cl-defun desire (package
-		  &key initname precondition-lisp-library precondition-system-executable ensurename (ensure desire-package-autoinstall) recipe)
+		  &key initname precondition-lisp-library precondition-system-executable ensurename (ensure desire-package-autoinstall) pkgman recipe)
   "Arrange loading and configuration of a desired emacs PACKAGE.
 PACKAGE is a symbol representing the name of a package.  The aim is to
 set up some autoloads and other initial configuration, and possibly
 organise for more configuration files to be dynamically loaded when
-the package itself is finally loaded. 
+the package itself is finally loaded.
 
 Accepts the following optional arguments:
 
@@ -344,6 +344,10 @@ Accepts the following properties:
     `t' - package autoinstalled.
     `nil' - package not autoinstalled.
     Default from `desire-package-autoinstall' variable.
+ :pkgman PACKAGE-MANAGER
+   Specifies a package-manager.
+   default: package
+   supported: package, quelpa, straight
  :recipe RECIPE
    Specifies a straight.el recipe to allow you to acquire packages from external
    sources. See https://github.com/raxod502/straight.el#the-recipe-format for
@@ -393,32 +397,55 @@ then nothing happens and nil is returned."
 
 (message "precond: %s" precond)
 
-;; Use recipe for straight.el
-(setq straight-recipe nil)
+;;; Set package manager
+(if pkgman
+    (setq recipe-type (prin1-to-string pkgman))
+  (setq recipe-type "package"))
+
+(message "recipe-type: %s" recipe-type)
+
+;; Use recipe
 (if recipe
-    (progn
-      (setq straight-recipe (cons package recipe))
-      ;;; vc-recipe
-      (setq desire-vc-plist (desire-vc--normalise-args recipe))
-      (setq vc-recipe-url (concat (plist-get desire-vc-plist ':fetcher) (plist-get desire-vc-plist ':repo)))
-      (setq vc-recipe nil)
-      (setq vc-recipe (plist-put vc-recipe ':url vc-recipe-url))
-      (if (plist-member desire-vc-plist ':branch)
-	  (progn
-	    (setq vc-recipe-branch (plist-get desire-vc-plist ':branch))
-	    (setq vc-recipe (plist-put vc-recipe ':branch vc-recipe-branch)))
-	nil)
-      (setq vc-recipe (cons package vc-recipe))
-      )
+    (cond
+     ;; straight-recipe
+     ((equal recipe-type "straight")
+      (progn
+      	(setq straight-recipe nil)
+	(setq straight-recipe (cons package recipe))))
+     ;; quelpa-recipe
+     ((equal recipe-type "quelpa")
+      (progn
+      	(setq quelpa-recipe nil)
+	(setq quelpa-recipe (cons package recipe))))
+     ;; vc-recipe
+     ((equal recipe-type "package")
+      (progn
+	(setq vc-recipe nil)
+	(setq desire-vc-plist (desire-vc--normalise-args recipe))
+	(setq vc-recipe-url (concat (plist-get desire-vc-plist ':fetcher) (plist-get desire-vc-plist ':repo)))
+	(setq vc-recipe (plist-put vc-recipe ':url vc-recipe-url))
+	(if (plist-member desire-vc-plist ':branch)
+	    (progn
+	      (setq vc-recipe-branch (plist-get desire-vc-plist ':branch))
+	      (setq vc-recipe (plist-put vc-recipe ':branch vc-recipe-branch)))
+	  nil)
+	(setq vc-recipe (cons package vc-recipe))))
+     )
   nil)
 
 ;; (when (and recipe (keywordp (car-safe recipe)))
 ;;   (plist-put! plist :recipe `(quote ,recipe)))
 (if recipe
-    (progn      
-      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe =  %s" package recipe straight-recipe)
-      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe =  %s" package recipe vc-recipe)
-      )
+    (cond
+     ;; straight-recipe
+     ((equal recipe-type "straight")
+      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe =  %s" package recipe straight-recipe))
+     ;; quelpa-recipe
+     ((equal recipe-type "quelpa")
+      (message "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe =  %s" package recipe quelpa-recipe))
+     ;; vc-recipe
+     ((equal recipe-type "package")
+      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe =  %s" package recipe vc-recipe)))
   nil)
 
 ;; Check ensure key
@@ -443,7 +470,7 @@ then nothing happens and nil is returned."
 ;;; Message: found executable precondition
 (if precondition-system-executable
     (if (executable-find precondition-system-executable)
-	(message "Executable file found %s to load package %s" 
+	(message "Executable file found %s to load package %s"
 		 (prin1-to-string precondition-system-executable)
 		 (prin1-to-string package))
       (message "Cannot find executable %s to load package %s"
@@ -468,27 +495,27 @@ then nothing happens and nil is returned."
 	((dirs desire-load-path)
 	 (pname (symbol-name package))
 	 (lname (if fname fname pname)))
-      
+
       (message "precondition: %s" precondition-lisp-library)
       (message "precond: %s" precond)
 
       ;; ;; Check ensure key
       ;; (if ensure
-      ;; 	  ;; check if the package is already installed
-      ;; 	  (if (or
-      ;; 	       (if (stringp package)
-      ;; 		   (locate-library package)
-      ;; 		 nil)
-      ;; 	       (if (stringp precond)
-      ;; 		   (locate-library precond)
-      ;; 		 nil)
-      ;; 	       )
-      ;; 	      t
-      ;; 	    ;; install package
-      ;; 	    (if ensurename
-      ;; 		(desire-install-package ensurename)
-      ;; 	      (desire-install-package package))
-      ;; 	    ))
+      ;;	  ;; check if the package is already installed
+      ;;	  (if (or
+      ;;	       (if (stringp package)
+      ;;		   (locate-library package)
+      ;;		 nil)
+      ;;	       (if (stringp precond)
+      ;;		   (locate-library precond)
+      ;;		 nil)
+      ;;	       )
+      ;;	      t
+      ;;	    ;; install package
+      ;;	    (if ensurename
+      ;;		(desire-install-package ensurename)
+      ;;	      (desire-install-package package))
+      ;;	    ))
 
       ;; (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
 
@@ -496,19 +523,19 @@ then nothing happens and nil is returned."
       ;; unconditional desirable
       ;; Возможно, нужно внести дополнительный ключ
       (desired package)
-      
+
       (while dirs
 
 	(let ((prefix (expand-file-name pname (car dirs))))
-	
+
 	  (cond
 	   ;;; Check for configuration file
 	   ((desire-readable-regular-file-p
 	     (concat prefix desire-extension))
-	    
+
 	    ;;; Load configuration data.
 	    (desire-load-file (car dirs) pname)
-	    
+
 	    ;; Finished!
 	    (desired package)
 	    ;;(setq dirs nil)
@@ -517,28 +544,28 @@ then nothing happens and nil is returned."
 	   ;;; Check for configuration directory
 	   ((and (file-directory-p prefix)
 		 (file-readable-p prefix))
-	    
+
 	    ;;; If file specified by desire-loaddefs exists then load it.
 	    (if (and desire-loaddefs
 		     (desire-readable-regular-file-p
 		      (expand-file-name
 		       (concat desire-loaddefs desire-extension)
 		       prefix)))
-		
+
 		(desire-load-file prefix desire-loaddefs))
 
 	    ;; Setup processing of directory.
 	    (eval-after-load
 		lname
 	      `(desire-process-directory, prefix))
-	    
+
 	    ;; Finished!
 	    (desired package)
 	    ;;(setq dirs nil)
 	    (setq dirs (cdr dirs)))
 
 	   ;; Otherwise
-	
+
 	   (t
 	    (setq dirs (cdr dirs)))
 	   ) ;; end cond
@@ -703,7 +730,7 @@ is the directory name with the prefix directory and extension removed."
 (defun desire-readable-regular-file-p (f)
 
   "Determine if F is a readable, regular file."
-  
+
   (and
    (if (fboundp 'file-regular-p)
        (file-regular-p f)
@@ -713,7 +740,7 @@ is the directory name with the prefix directory and extension removed."
 )
 
 (defun desire-readable-dir-p (dir)
-  "Determine if DIR is a readable directory."  
+  "Determine if DIR is a readable directory."
   (and
    (file-directory-p dir)
    (file-readable-p dir)))
@@ -733,22 +760,20 @@ is the directory name with the prefix directory and extension removed."
 ;;   "Install PACKAGE from repository"
 ;;   (unless (package-installed-p package)
 ;;     (if recipe
-;; 	(straight-use-package straight-recipe)
+;;	(straight-use-package quelpa-recipe)
 ;;       (progn
-;; 	(package-refresh-contents)
-;; 	(package-install package))
+;;	(package-refresh-contents)
+;;	(package-install package))
 ;;       )))
 
 (defun desire-install-package (package &optional recipe)
   "Install PACKAGE from repository"
   (unless (package-installed-p package)
     (if recipe
-	;; Only clone the package, don't build them.
-	;; Straight hasn't been fully configured by this point.
-	;; (straight-use-package straight-recipe nil t)
-	;; (straight-use-package straight-recipe)
-	;; (quelpa straight-recipe)
-	(package-vc-install vc-recipe)
+	(cond
+	 ((equal recipe-type "quelpa") (quelpa quelpa-recipe))
+	 ((equal recipe-type "straight") (straight-use-package straight-recipe))
+	 ((equal recipe-type "package") (package-vc-install vc-recipe)))
       (progn
 	(package-refresh-contents)
 	(package-install package))
