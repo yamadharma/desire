@@ -1,3 +1,12 @@
+## [1.0.3](https://github.com/yamadharma/desire/compare/v1.0.2...v1.0.3) (2025-01-25)
+
+
+### Features
+
+* **desire:** add straight and quelpa support ([e3a1f06](https://github.com/yamadharma/desire/commit/e3a1f06f96872bb831c29c70fdbc2087341ea785))
+
+
+
 ## [1.0.2](https://github.com/yamadharma/desire/compare/v1.0.1...v1.0.2) (2024-12-10)
 
 
