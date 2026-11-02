@@ -101,13 +101,14 @@ The function `desired' will add an item to this list.")
 	    :sourcehut "https://git.sr.ht/~")
   "Places from where to fetch packages.")
 
-;; (cl-defun desire-vc--install (&key verbatim fetcher repo name rev backend)
-;;   "Thin wrapper around `package-vc-install'.
-;; This exists so we can have sane keywords arguments, yet don't
-;; have to go overboard when normalising."
-;;   (if verbatim
-;;       (package-vc-install verbatim)
-;;     (package-vc-install (concat fetcher repo) rev backend name)))
+(cl-defun desire-vc--install (package &key fetcher repo url name rev backend
+                                      &allow-other-keys)
+  "Install PACKAGE from a package-vc recipe.
+URL, if given, is used verbatim as the source URL; otherwise FETCHER
+and REPO are concatenated.  REV selects the revision, BACKEND the VC
+backend, NAME overrides PACKAGE as the package name."
+  (package-vc-install (or url (concat fetcher repo))
+                      rev backend (or name package)))
 
 (defun desire-vc--check-fetcher (val)
   "Check whether VAL is a correct `:fetcher' argument.
@@ -308,8 +309,8 @@ then nothing happens and nil is returned."
 
 	      ;; Setup processing of directory.
 	      (eval-after-load
-		  lname
-		`(desire-process-directory, prefix))
+	       lname
+	       `(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
