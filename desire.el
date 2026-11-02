@@ -90,10 +90,6 @@ The function `desired' will add an item to this list.")
   "Internal: precondition library used by `desire'.")
 
 ;;; package-vc backend
-(defvar desire-vc-keywords
-  '(:fetcher :repo :rev :backend)
-  "All arguments that `package-vc-install' supports.")
-
 (defconst desire-vc-fetchers
   '(:github "https://github.com/"
 	    :gitlab "https://gitlab.com/"
@@ -139,19 +135,16 @@ or a symbol representing one possible destination in
 ;;   desire-vc--normalise-args args
 ;;   )
 
-;;; }}}
-
-
-
-;; (defun desired (package &optional fname precond)
 (cl-defun desired (package
 		   &key precondition-lisp-library precondition-system-executable)
-  "Add PACKAGE (a symbol) as something which is `desirable'.
-  The optional argument FNAME is a string containing
-  the name of the file that, when loaded, will
-  trigger dynamic loading of extra configuration files. If FNAME is
-  omitted then the string corresponding to PACKAGE is used instead.
-  PRECOND is name of file as precondition for package loadind."
+  "Mark PACKAGE (a symbol) as desirable.
+PACKAGE is added to the list `desirable' if:
+  - PRECONDITION-LISP-LIBRARY, when non-nil, is a string naming a
+    library that must be locatable via `locate-library', and
+  - PRECONDITION-SYSTEM-EXECUTABLE, when non-nil, is a string naming
+    an executable that must be findable via `executable-find'.
+If PACKAGE is already `desirable', this is a no-op.  Always returns
+nil; use `desiredp' to query the state."
 
   (or (symbolp package)
       (error "Wrong type argument to `desired': symbolp, %s"
@@ -334,39 +327,60 @@ then nothing happens and nil is returned."
   ) ; end defun desire
 
 (cl-defun desire (package
-		  &key initname precondition-lisp-library precondition-system-executable ensurename (ensure desire-package-autoinstall) pkgman recipe)
+		  &key initname precondition-lisp-library precondition-system-executable
+		  ensurename (ensure desire-package-autoinstall)
+		  pkgman recipe no-precondition-check)
   "Arrange loading and configuration of a desired emacs PACKAGE.
 PACKAGE is a symbol representing the name of a package.  The aim is to
 set up some autoloads and other initial configuration, and possibly
 organise for more configuration files to be dynamically loaded when
 the package itself is finally loaded.
 
-Accepts the following optional arguments:
-
-Accepts the following properties:
+Accepts the following keyword arguments:
 
  :initname FNAME
-    FNAME is a string containing the name of the file that, when loaded, will
-    trigger dynamic loading of extra configuration files. If FNAME is
-    omitted then the string corresponding to PACKAGE is used instead.
- :precondition PRECOND
-    PRECOND is name of lisp file as precondition for package loadind.
- :executable EXECUTABLE
-    EXECUTABLE is name of executable file as precondition for package loadind.
- :ensurename PACKAGE-NAME Name of package on repository (like melpa).
- :autoinstall BOOL
-    Specifies package autoinstallation.
-    `t' - package autoinstalled.
-    `nil' - package not autoinstalled.
-    Default from `desire-package-autoinstall' variable.
- :pkgman PACKAGE-MANAGER
-   Specifies a package-manager.
-   default: package
-   supported: package, quelpa, straight
+    FNAME is a string containing the name of the file that, when loaded,
+    will trigger dynamic loading of extra configuration files.  If FNAME
+    is omitted then the string corresponding to PACKAGE is used instead.
+
+ :precondition-lisp-library LIB
+    LIB is the name of a lisp library (a string) that must be locatable
+    via `locate-library' before configuration files for PACKAGE are
+    loaded.  Defaults to PACKAGE's name, so configuration is only loaded
+    when the package itself can already be found; this prevents a `.ecf'
+    file that `require's the package from failing when the package is
+    not installed.
+
+ :precondition-system-executable EXEC
+    EXEC is the name of an executable (a string) that must be present
+    (found via `executable-find') before configuration files for PACKAGE
+    are loaded.  A warning is issued if EXEC cannot be found.
+
+ :ensurename NAME
+    NAME (a symbol or string) is the name under which the package is
+    known to the package manager (e.g. on MELPA).  Used only when
+    `:ensure' is non-nil.
+
+ :ensure BOOL
+    When non-nil, ensure PACKAGE is installed before loading its
+    configuration.  Defaults to the value of
+    `desire-package-autoinstall'.  Pass `:ensure nil' to suppress
+    auto-installation for a single call.
+
+ :pkgman MANAGER
+    Package manager to use when installing: `package' (default),
+    `quelpa' or `straight'.
+
  :recipe RECIPE
-   Specifies a straight.el recipe to allow you to acquire packages from external
-   sources. See https://github.com/raxod502/straight.el#the-recipe-format for
-   details on this recipe.
+    Recipe understood by the selected `:pkgman'.  For `:pkgman package'
+    the recipe is a plist with keys recognised by
+    `desire-vc--normalise-args' (`:fetcher', `:repo', `:rev',
+    `:backend').  For straight/quelpa see the respective documentation.
+
+ :no-precondition-check BOOL
+    Internal.  When non-nil, skip the `:precondition-lisp-library'
+    check entirely.  Used by the deprecated `desire-conf' wrapper to
+    preserve its historical behaviour.  Do not use in new code.
 
 Each directory in `desire-load-path' is searched in order to see if
 configuration data for PACKAGE exists.  The configuration data takes
@@ -405,13 +419,23 @@ then nothing happens and nil is returned."
   (message "initname: %s" initname)
   (message "fname: %s" desire--fname)
 
-  ;; Set lisp library precondition
+  ;; Set lisp library precondition.
+  ;;
+  ;; Priority order:
+  ;;   1. :no-precondition-check t      -> no check at all
+  ;;   2. :precondition-lisp-library X  -> must be locatable
+  ;;   3. default                       -> require PACKAGE itself
+  ;;
+  ;; Case 3 is what most users want: a `.ecf' for PACKAGE should only
+  ;; run when PACKAGE is installed.  Case 1 is used by the deprecated
+  ;; `desire-conf' wrapper to preserve its historical "no check" default.
   (setq desire--precond
-	(if precondition-lisp-library
-            precondition-lisp-library
-          (prin1-to-string package)))
+	(cond
+	 (no-precondition-check nil)
+	 (precondition-lisp-library precondition-lisp-library)
+	 (t (prin1-to-string package))))
 
-  (message "precond: %s" desire--precond)
+  (desire--debug "precond: %s" desire--precond)
 
 ;;; Set package manager
   (setq desire--recipe-type
