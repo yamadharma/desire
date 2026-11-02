@@ -618,52 +618,42 @@ loaded first.  A file for the pseudo-package specified by
   (let
       ((fs (desire-directory-file-prefixes dir))
        (ds (desire-directory-dir-prefixes dir))
-       exec)
+       exec-file
+       exec-dir)
 
     ;; Check for the desire-desire file.
-    (if (member desire-desire fs)
-
-	(progn
-	  (desire-load-file dir desire-desire)
-	  (setq fs (delete desire-desire fs))))
+    (when (member desire-desire fs)
+      (desire-load-file dir desire-desire)
+      (setq fs (delete desire-desire fs)))
 
     ;; Check for the desire-desire dir.
-    (if (member desire-desire ds)
+    (when (member desire-desire ds)
+      (desire-load-dir dir desire-desire)
+      (setq ds (delete desire-desire ds)))
 
-	(progn
-	  (desire-load-dir dir desire-desire)
-	  (setq ds (delete desire-desire ds))))
-
-    ;; Check for the desire-execute file.
-    (if (member desire-execute fs)
-	(progn
-	  (setq exec t)
-	  (setq fs (delete desire-execute fs))))
+    ;; Check for the desire-execute file and dir (both supported).
+    (when (member desire-execute fs)
+      (setq exec-file t)
+      (setq fs (delete desire-execute fs)))
+    (when (member desire-execute ds)
+      (setq exec-dir t)
+      (setq ds (delete desire-execute ds)))
 
     ;; Load desirable files.
-    (while fs
-      (let ((hd (car fs)))
-
-	;; Check to see if the prefix represents a feature.
-	(if (desiredp hd)
-	    (desire-load-file dir hd)))
-      (setq fs (cdr fs)))
+    (dolist (f fs)
+      (when (desiredp f)
+	(desire-load-file dir f)))
 
     ;; Load desirable dirs.
-    (while ds
-      (let ((hd (car ds)))
+    (dolist (d ds)
+      (when (desiredp d)
+	(desire-load-dir dir d)))
 
-	;; Check to see if the prefix represents a feature.
-	(if (desiredp hd)
-	    (desire-load-dir dir hd)))
-
-      (setq ds (cdr ds)))
-
-    ;; Load desire-execute if required.
-    (if exec
-	(desire-load-file dir desire-execute))
-    )
-  )
+    ;; Load desire-execute last (file then dir).
+    (when exec-file
+      (desire-load-file dir desire-execute))
+    (when exec-dir
+      (desire-load-dir dir desire-execute))))
 
 (defun desire-directory-file-prefixes (dir)
 
