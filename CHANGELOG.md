@@ -1,3 +1,30 @@
+## [1.1.1](https://github.com/yamadharma/desire/compare/v1.1.0...v1.1.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **desire:** add check load patch ([116ed8d](https://github.com/yamadharma/desire/commit/116ed8d27e8a095847decaef5e467efd84a20baf))
+* **desire:** add desire-conf не останавливаться на первой найденной директории ([28449c9](https://github.com/yamadharma/desire/commit/28449c9cb33dcc1d0d45575599d9177afbe68542))
+* **desire:** change defvar → defconst ([991a1dd](https://github.com/yamadharma/desire/commit/991a1ddd1b98f23ac25f317590cde1fdccd41511))
+* **desire:** change desire docstring ([2dddd09](https://github.com/yamadharma/desire/commit/2dddd090b4b6d4b3c854558449cf1d4ccec2d532))
+* **desire:** fix ) ([2854ad4](https://github.com/yamadharma/desire/commit/2854ad47d26b7e146173c7617e80d6a87fe6a905))
+* **desire:** fix debug messages ([e8bae55](https://github.com/yamadharma/desire/commit/e8bae55e6e9bcdd163eb6f0376c7c68fb7e14e2a))
+* **desire:** fix desire docstring ([13fdf9e](https://github.com/yamadharma/desire/commit/13fdf9e8c76d4c9a75f54d76bbfdf45b8ab9a9af))
+* **desire:** fix desire-process-directory ([1e9fbdc](https://github.com/yamadharma/desire/commit/1e9fbdc7497c6d69ad0cc3d23b52f69ef0ec909c))
+* **desire:** remove unconditional (desired package) ([c91e593](https://github.com/yamadharma/desire/commit/c91e593f9c31ac65e0f047d51d216de176ea7e27))
+
+
+### Features
+
+* **desire:** add debug helpers ([66a159f](https://github.com/yamadharma/desire/commit/66a159f5e191654dcb2941327b47847a767a9d46))
+
+
+### Reverts
+
+* **desire:** revert to master ([c74bc06](https://github.com/yamadharma/desire/commit/c74bc06d427a3c737c51c055e28c32a3ae5077cf))
+
+
+
 # [1.1.0](https://github.com/yamadharma/desire/compare/v1.0.3...v1.1.0) (2026-11-02)
 
 
