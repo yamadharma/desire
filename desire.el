@@ -89,6 +89,30 @@ The function `desired' will add an item to this list.")
 (defvar desire--precond nil
   "Internal: precondition library used by `desire'.")
 
+;;; Helpers
+(defvar desire-debug nil
+  "When non-nil, `desire' logs verbose diagnostic messages.
+Set this via `setq' or `customize' when troubleshooting package
+configuration.")
+
+(defvar desire--load-path-warned nil
+  "Set to t once the empty-`desire-load-path' warning has been shown.")
+
+(defmacro desire--debug (fmt &rest args)
+  "Log FMT/ARGS via `message' when `desire-debug' is non-nil."
+  (declare (indent 1) (debug t))
+  `(when desire-debug
+     (message ,fmt ,@args)))
+
+(defun desire--check-load-path ()
+  "Warn (once) if `desire-load-path' is empty."
+  (when (and (null desire-load-path)
+             (not desire--load-path-warned))
+    (setq desire--load-path-warned t)
+    (display-warning 'desire
+                     "`desire-load-path' is nil; no configuration files will be loaded."
+                     :warning)))
+
 ;;; package-vc backend
 (defvar desire-vc-keywords
   '(:fetcher :repo :rev :backend)
@@ -243,6 +267,8 @@ then nothing happens and nil is returned."
 	     )
       )
 
+  (desire--check-load-path)
+
   ;; check autoinstall key
   (if autoinstall
       ;; install package
@@ -285,12 +311,11 @@ then nothing happens and nil is returned."
 
 	      ;; Finished!
 	      (desired package)
-					;(setq dirs nil)
-	      (setq dirs (cdr dirs))
+	      (setq dirs nil)
+	      ;; (setq dirs (cdr dirs))
 	      )
 
-	     ;;}}}
-	     ;;{{{ Check for configuration directory
+	     ;; Check for configuration directory
 
 	     (
 	      (and (file-directory-p prefix)
@@ -307,19 +332,17 @@ then nothing happens and nil is returned."
 		  (desire-load-file prefix desire-loaddefs)
 		)
 
-	      ;; Setup processing of directory.
+	      ;; Setup processing of directory
 	      (eval-after-load
 		  lname
 		`(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
-					;(setq dirs nil)
-	      (setq dirs (cdr dirs))
-	      )
+	      (setq dirs nil))
+	     ;; (setq dirs (cdr dirs))
 
-	     ;;}}}
-	     ;;{{{ Otherwise
+	     ;; Otherwise
 
 	     (t
 	      (setq dirs (cdr dirs))
@@ -349,10 +372,17 @@ Accepts the following properties:
     FNAME is a string containing the name of the file that, when loaded, will
     trigger dynamic loading of extra configuration files. If FNAME is
     omitted then the string corresponding to PACKAGE is used instead.
- :precondition PRECOND
-    PRECOND is name of lisp file as precondition for package loadind.
- :executable EXECUTABLE
-    EXECUTABLE is name of executable file as precondition for package loadind.
+ :precondition-lisp-library LIB
+    LIB is the name of a lisp library (a string) that must be
+    locatable via `locate-library' before configuration files for
+    PACKAGE are loaded.  Defaults to PACKAGE's name, so configuration
+    is only loaded when the package itself can already be found; this
+    prevents a `.ecf' file that `require's the package from failing
+    when the package is not installed.
+ :precondition-system-executable EXEC
+    EXEC is the name of an executable (a string) that must be present
+    (found via `executable-find') before configuration files for
+    PACKAGE are loaded.  A warning is issued if EXEC cannot be found.
  :ensurename PACKAGE-NAME Name of package on repository (like melpa).
  :autoinstall BOOL
     Specifies package autoinstallation.
@@ -399,11 +429,10 @@ then nothing happens and nil is returned."
       (error "Wrong type argument to `desire': symbolp, %s"
 	     (prin1-to-string package)))
 
+  (desire--check-load-path)
+
   ;; Set initial file/directory name
   (setq desire--fname initname)
-
-  (message "initname: %s" initname)
-  (message "fname: %s" desire--fname)
 
   ;; Set lisp library precondition
   (setq desire--precond
@@ -411,16 +440,16 @@ then nothing happens and nil is returned."
             precondition-lisp-library
           (prin1-to-string package)))
 
-  (message "precond: %s" desire--precond)
+  (desire--debug "precond: %s" desire--precond)
 
 ;;; Set package manager
   (setq desire--recipe-type
 	(cond ((null pkgman) "package")
-              ((symbolp pkgman) (symbol-name pkgman))
-              ((stringp pkgman) pkgman)
-              (t (error "Unsupported :pkgman %S" pkgman))))
+	      ((symbolp pkgman) (symbol-name pkgman))
+	      ((stringp pkgman) pkgman)
+	      (t (error "Unsupported :pkgman %S" pkgman))))
 
-  (message "recipe-type: %s" desire--recipe-type)
+  (desire--debug "recipe-type: %s" desire--recipe-type)
 
   ;; Use recipe
   (when recipe
@@ -439,14 +468,14 @@ then nothing happens and nil is returned."
   (when recipe
     (cond
      ((equal desire--recipe-type "straight")
-      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
-               package recipe desire--straight-recipe))
+      (desire--debug "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
+                     package recipe desire--straight-recipe))
      ((equal desire--recipe-type "quelpa")
-      (message "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
-               package recipe desire--quelpa-recipe))
+      (desire--debug "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
+                     package recipe desire--quelpa-recipe))
      ((equal desire--recipe-type "package")
-      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
-               package recipe desire--vc-recipe))))
+      (desire--debug "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
+                     package recipe desire--vc-recipe))))
 
   ;; Check ensure key
   (when ensure
@@ -459,18 +488,20 @@ then nothing happens and nil is returned."
           (desire-install-package ensurename recipe)
 	(desire-install-package package recipe))))
 
-  (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
+  (desire--debug "ensure: %s : %s; ensurename = %s" package ensure ensurename)
 
-;;; Message: found executable precondition
-  (if precondition-system-executable
-      (if (executable-find precondition-system-executable)
-	  (message "Executable file found %s to load package %s"
-		   (prin1-to-string precondition-system-executable)
-		   (prin1-to-string package))
-	(message "Cannot find executable %s to load package %s"
-		 (prin1-to-string precondition-system-executable)
-		 (prin1-to-string package)))
-    nil)
+;;; Executable precondition diagnostics
+  (when precondition-system-executable
+    (if (executable-find precondition-system-executable)
+	(desire--debug "Executable file found %s to load package %s"
+                       (prin1-to-string precondition-system-executable)
+                       (prin1-to-string package))
+      (display-warning
+       'desire
+       (format "Cannot find executable %s required for package %s"
+               (prin1-to-string precondition-system-executable)
+               (prin1-to-string package))
+       :warning)))
 
 ;;; Check precondition
   (if (and
@@ -489,36 +520,16 @@ then nothing happens and nil is returned."
 	   (pname (symbol-name package))
 	   (lname (if desire--fname desire--fname pname)))
 
-	(message "precondition: %s" precondition-lisp-library)
-	(message "precond: %s" desire--precond)
+	(desire--debug "precondition: %s" precondition-lisp-library)
+	(desire--debug "precond: %s" desire--precond)
 
-	;; ;; Check ensure key
-	;; (if ensure
-	;;	  ;; check if the package is already installed
-	;;	  (if (or
-	;;	       (if (stringp package)
-	;;		   (locate-library package)
-	;;		 nil)
-	;;	       (if (stringp precond)
-	;;		   (locate-library precond)
-	;;		 nil)
-	;;	       )
-	;;	      t
-	;;	    ;; install package
-	;;	    (if ensurename
-	;;		(desire-install-package ensurename)
-	;;	      (desire-install-package package))
-	;;	    ))
-
-	;; (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
-
-	;;Test
-	;; unconditional desirable
-	;; Возможно, нужно внести дополнительный ключ
-	(desired package)
+	;; NOTE: PACKAGE is deliberately *not* marked `desired' here.
+	;; It is marked inside each successful branch of the `cond' below,
+	;; so that a package whose configuration could not be found stays
+	;; un-desired and can be retried later.  This matches `desire-conf'.
+	;; (desired package)
 
 	(while dirs
-
 	  (let ((prefix (expand-file-name pname (car dirs))))
 
 	    (cond
@@ -526,13 +537,12 @@ then nothing happens and nil is returned."
 	     ((desire-readable-regular-file-p
 	       (concat prefix desire-extension))
 
-	    ;;; Load configuration data.
+	    ;;; Load configuration data
 	      (desire-load-file (car dirs) pname)
 
 	      ;; Finished!
 	      (desired package)
-	      ;;(setq dirs nil)
-	      (setq dirs (cdr dirs)))
+	      (setq dirs nil))
 
 	   ;;; Check for configuration directory
 	     ((and (file-directory-p prefix)
@@ -547,15 +557,14 @@ then nothing happens and nil is returned."
 
 		  (desire-load-file prefix desire-loaddefs))
 
-	      ;; Setup processing of directory
+	      ;; Setup processing of directory.
 	      (eval-after-load
 		  lname
 		`(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
-	      ;;(setq dirs nil)
-	      (setq dirs (cdr dirs)))
+	      (setq dirs nil))
 
 	     ;; Otherwise
 
@@ -609,52 +618,42 @@ loaded first.  A file for the pseudo-package specified by
   (let
       ((fs (desire-directory-file-prefixes dir))
        (ds (desire-directory-dir-prefixes dir))
-       exec)
+       exec-file
+       exec-dir)
 
     ;; Check for the desire-desire file.
-    (if (member desire-desire fs)
-
-	(progn
-	  (desire-load-file dir desire-desire)
-	  (setq fs (delete desire-desire fs))))
+    (when (member desire-desire fs)
+      (desire-load-file dir desire-desire)
+      (setq fs (delete desire-desire fs)))
 
     ;; Check for the desire-desire dir.
-    (if (member desire-desire ds)
+    (when (member desire-desire ds)
+      (desire-load-dir dir desire-desire)
+      (setq ds (delete desire-desire ds)))
 
-	(progn
-	  (desire-load-dir dir desire-desire)
-	  (setq ds (delete desire-desire ds))))
-
-    ;; Check for the desire-execute file.
-    (if (member desire-execute fs)
-	(progn
-	  (setq exec t)
-	  (setq fs (delete desire-execute fs))))
+    ;; Check for the desire-execute file and dir (both supported).
+    (when (member desire-execute fs)
+      (setq exec-file t)
+      (setq fs (delete desire-execute fs)))
+    (when (member desire-execute ds)
+      (setq exec-dir t)
+      (setq ds (delete desire-execute ds)))
 
     ;; Load desirable files.
-    (while fs
-      (let ((hd (car fs)))
-
-	;; Check to see if the prefix represents a feature.
-	(if (desiredp hd)
-	    (desire-load-file dir hd)))
-      (setq fs (cdr fs)))
+    (dolist (f fs)
+      (when (desiredp f)
+	(desire-load-file dir f)))
 
     ;; Load desirable dirs.
-    (while ds
-      (let ((hd (car ds)))
+    (dolist (d ds)
+      (when (desiredp d)
+	(desire-load-dir dir d)))
 
-	;; Check to see if the prefix represents a feature.
-	(if (desiredp hd)
-	    (desire-load-dir dir hd)))
-
-      (setq ds (cdr ds)))
-
-    ;; Load desire-execute if required.
-    (if exec
-	(desire-load-file dir desire-execute))
-    )
-  )
+    ;; Load desire-execute last (file then dir).
+    (when exec-file
+      (desire-load-file dir desire-execute))
+    (when exec-dir
+      (desire-load-dir dir desire-execute))))
 
 (defun desire-directory-file-prefixes (dir)
 
