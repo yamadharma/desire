@@ -215,139 +215,30 @@ nil; use `desiredp' to query the state."
     (and (member p desirable) t)))
 
 (defun desire-conf (package &optional fname precond autoinstall)
-  "Arrange loading and configuration of a desired emacs PACKAGE.
-PACKAGE is a symbol representing the name of a package.  The aim is to
-set up some autoloads and other initial configuration, and possibly
-organise for more configuration files to be dynamically loaded when
-the package itself is finally loaded.  The optional argument FNAME is
-a string containing the name of the file that, when loaded, will
-trigger dynamic loading of extra configuration files. If FNAME is
-omitted then the string corresponding to PACKAGE is used instead.
-PRECOND is name of file as precondition for package loadind.
+  "Deprecated positional wrapper around `desire'.
+Kept for backward compatibility with older configurations; new code
+should call `desire' with keyword arguments instead.
 
-AUTOINSTALL: if equal 't then package autoinstalled.
+Original behaviour:
+  PACKAGE     – symbol; the package to configure.
+  FNAME       – init file name (defaults to PACKAGE's name).
+  PRECOND     – lisp library precondition (no default check).
+  AUTOINSTALL – when non-nil, install PACKAGE if not installed.
 
-Each directory in `desire-load-path' is searched in order to see if
-configuration data for PACKAGE exists.  The configuration data takes
-one of 2 forms:
-
-1. A file named PACKAGE followed by the value of the variable
-   `desire-extension'.  If such a file exists, then that file is taken
-   to be the sole configuration file for the package.  This file is
-   loaded immediately.  The file might contain autoloads or might load
-   the package itself.
-
-2. A directory named PACKAGE. If the directory contains a file
-   corresponding to `desire-loaddefs' then that file is loaded
-   immediately.  Other files in the directory are processed using the
-   function `desire-process-directory' after the package is actually
-   loaded.
-
-Note that a single file, as described in (1), takes precedence over a
-directory, as described in (2).  For a directory, if the package has
-already been loaded then the configuration data *is* loaded but the
-package is *not*.  This depends on the `eval-after-load' function
-behaving similarly.
-
-If a package is successfully configured then it is `desired' and,
-therefore, marked as `desirable'.  Desirability can be checked using
-the function `desiredp'.  If PACKAGE has been previously `desired'
-then nothing happens and nil is returned."
-
-  (or (symbolp package)
-      (error "Wrong type argument to `desire': symbolp, %s"
-	     (prin1-to-string package)
-	     )
-      )
-
-  (desire--check-load-path)
-
-  ;; check autoinstall key
-  (if autoinstall
-      ;; install package
-      (desire-install-package package)
-    nil
-    )
-
-  ;; Check precondition
-  (if (and
-       (not (desiredp package))
-       (if precond
-	   (if (stringp precond)
-	       (locate-library precond)
-	     nil
-	     )
-	 t
-	 )
-       )
-      (let*
-	  (
-	   (dirs desire-load-path)
-	   (pname (symbol-name package))
-	   (lname (if fname fname pname))
-	   )
-
-	(while dirs
-
-	  (let ((prefix (expand-file-name pname (car dirs))))
-
-	    (cond
-	     ;;{{{ Check for configuration file
-
-	     (
-	      (desire-readable-regular-file-p
-	       (concat prefix desire-extension)
-	       )
-
-	      ;; Load configuration data.
-	      (desire-load-file (car dirs) pname)
-
-	      ;; Finished!
-	      (desired package)
-	      (setq dirs nil)
-	      ;; (setq dirs (cdr dirs))
-	      )
-
-	     ;; Check for configuration directory
-
-	     (
-	      (and (file-directory-p prefix)
-		   (file-readable-p prefix)
-		   )
-
-	      ;; If file specified by desire-loaddefs exists then load it.
-	      (if (and desire-loaddefs
-		       (desire-readable-regular-file-p
-			(expand-file-name
-			 (concat desire-loaddefs desire-extension)
-			 prefix)))
-
-		  (desire-load-file prefix desire-loaddefs)
-		)
-
-	      ;; Setup processing of directory
-	      (eval-after-load
-		  lname
-		`(desire-process-directory ,prefix))
-
-	      ;; Finished!
-	      (desired package)
-	      (setq dirs nil))
-	     ;; (setq dirs (cdr dirs))
-
-	     ;; Otherwise
-
-	     (t
-	      (setq dirs (cdr dirs))
-	      )
-
-	     ;;}}}
-	     ) ; end cond
-	    ) ; end let
-	  ) ; end while
-	) ; end let*
-    ) ; end if
-  ) ; end defun desire
+Equivalent modern call:
+  (desire PACKAGE
+          :initname FNAME
+          :precondition-lisp-library PRECOND
+          :no-precondition-check (null PRECOND)
+          :ensure AUTOINSTALL)"
+  (declare (advertised-calling-convention
+            (package &rest args)
+            "desire.el 2025"))
+  (desire package
+          :initname fname
+          :precondition-lisp-library precond
+          :no-precondition-check (null precond)
+          :ensure autoinstall))
 
 (cl-defun desire (package
 		  &key initname precondition-lisp-library precondition-system-executable
