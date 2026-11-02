@@ -36,36 +36,36 @@
 (defvar desire-load-path nil
   "*List of directories to be searched by `desire' for configuration data.")
 
-(defvar desire-extension ".ecf"
-  "*The extension given to configuration files used by `desire'.")
+(defconst desire-extension ".ecf"
+  "The extension given to configuration files used by `desire'.")
 
-(defvar desire-dir-extension ".ecd"
-  "*The extension given to configuration directories used by `desire'.")
+(defconst desire-dir-extension ".ecd"
+  "The extension given to configuration directories used by `desire'.")
 
-(defvar desire-loaddefs "loaddefs"
-  "*A string which is the name of a configuration file that is loaded
-before a package itself is loaded.  This is useful for autoloading
-functions.")
+(defconst desire-loaddefs "loaddefs"
+  "Name of a configuration file that is loaded before a package itself
+is loaded.  Useful for autoloading functions.")
 
-(defvar desire-desire "desire"
-  "*A string which is the name of a configuration file that is loaded
-after a package itself is loaded, but before the configuration files
-for any other desirable package.  This is useful for performing some
-initial setup.")
+(defconst desire-desire "desire"
+  "Name of a configuration file that is loaded after a package itself
+is loaded, but before the configuration files for any other desirable
+package.  Useful for performing some initial setup.")
 
-(defvar desire-execute "execute"
-  "*A string which is the name of a configuration file that is loaded
-after a package itself is loaded, and also after the configuration
-files for any other desirable package.  This is useful for performing
-some final setup.")
+(defconst desire-execute "execute"
+  "Name of a configuration file that is loaded after a package itself
+is loaded, and also after the configuration files for any other
+desirable package.  Useful for performing some final setup.")
 
-(defvar desire-postinstall "postinstall"
+(defconst desire-postinstall "postinstall"
   "*A string which is the name of a configuration file that is loaded
 after a package itself is installed. This is useful for performing
 some final setup.")
 
+(defvar desire-precondition nil
+  "*Precondition for package loading.")
+
 (defvar desire-package-autoinstall t
-  "*Enable automatic installation of a package if it is not present on the system.")
+  "Enable automatic installation of a package if it is not present on the system.")
 
 (defvar desirable nil
   "A list of strings for packages which have been successfully desired.
