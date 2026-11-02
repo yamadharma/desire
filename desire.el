@@ -425,16 +425,13 @@ then nothing happens and nil is returned."
   ;; Set initial file/directory name
   (setq desire--fname initname)
 
-  (message "initname: %s" initname)
-  (message "fname: %s" desire--fname)
-
   ;; Set lisp library precondition
   (setq desire--precond
 	(if precondition-lisp-library
             precondition-lisp-library
           (prin1-to-string package)))
 
-  (message "precond: %s" desire--precond)
+  (desire--debug "precond: %s" desire--precond)
 
 ;;; Set package manager
   (setq desire--recipe-type
@@ -443,7 +440,7 @@ then nothing happens and nil is returned."
 	      ((stringp pkgman) pkgman)
 	      (t (error "Unsupported :pkgman %S" pkgman))))
 
-  (message "recipe-type: %s" desire--recipe-type)
+  (desire--debug "recipe-type: %s" desire--recipe-type)
 
   ;; Use recipe
   (when recipe
@@ -462,14 +459,14 @@ then nothing happens and nil is returned."
   (when recipe
     (cond
      ((equal desire--recipe-type "straight")
-      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
-	       package recipe desire--straight-recipe))
+      (desire--debug "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
+                     package recipe desire--straight-recipe))
      ((equal desire--recipe-type "quelpa")
-      (message "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
-	       package recipe desire--quelpa-recipe))
+      (desire--debug "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
+                     package recipe desire--quelpa-recipe))
      ((equal desire--recipe-type "package")
-      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
-	       package recipe desire--vc-recipe))))
+      (desire--debug "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
+                     package recipe desire--vc-recipe))))
 
   ;; Check ensure key
   (when ensure
@@ -482,18 +479,20 @@ then nothing happens and nil is returned."
           (desire-install-package ensurename recipe)
 	(desire-install-package package recipe))))
 
-  (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
+  (desire--debug "ensure: %s : %s; ensurename = %s" package ensure ensurename)
 
-;;; Message: found executable precondition
-  (if precondition-system-executable
-      (if (executable-find precondition-system-executable)
-	  (message "Executable file found %s to load package %s"
-		   (prin1-to-string precondition-system-executable)
-		   (prin1-to-string package))
-	(message "Cannot find executable %s to load package %s"
-		 (prin1-to-string precondition-system-executable)
-		 (prin1-to-string package)))
-    nil)
+;;; Executable precondition diagnostics
+  (when precondition-system-executable
+    (if (executable-find precondition-system-executable)
+	(desire--debug "Executable file found %s to load package %s"
+                       (prin1-to-string precondition-system-executable)
+                       (prin1-to-string package))
+      (display-warning
+       'desire
+       (format "Cannot find executable %s required for package %s"
+               (prin1-to-string precondition-system-executable)
+               (prin1-to-string package))
+       :warning)))
 
 ;;; Check precondition
   (if (and
