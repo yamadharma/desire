@@ -512,36 +512,16 @@ then nothing happens and nil is returned."
 	   (pname (symbol-name package))
 	   (lname (if desire--fname desire--fname pname)))
 
-	(message "precondition: %s" precondition-lisp-library)
-	(message "precond: %s" desire--precond)
+	(desire--debug "precondition: %s" precondition-lisp-library)
+	(desire--debug "precond: %s" desire--precond)
 
-	;; ;; Check ensure key
-	;; (if ensure
-	;;	  ;; check if the package is already installed
-	;;	  (if (or
-	;;	       (if (stringp package)
-	;;		   (locate-library package)
-	;;		 nil)
-	;;	       (if (stringp precond)
-	;;		   (locate-library precond)
-	;;		 nil)
-	;;	       )
-	;;	      t
-	;;	    ;; install package
-	;;	    (if ensurename
-	;;		(desire-install-package ensurename)
-	;;	      (desire-install-package package))
-	;;	    ))
-
-	;; (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
-
-	;;Test
-	;; unconditional desirable
-	;; Возможно, нужно внести дополнительный ключ
-	(desired package)
+	;; NOTE: PACKAGE is deliberately *not* marked `desired' here.
+	;; It is marked inside each successful branch of the `cond' below,
+	;; so that a package whose configuration could not be found stays
+	;; un-desired and can be retried later.  This matches `desire-conf'.
+	;; (desired package)
 
 	(while dirs
-
 	  (let ((prefix (expand-file-name pname (car dirs))))
 
 	    (cond
@@ -549,13 +529,12 @@ then nothing happens and nil is returned."
 	     ((desire-readable-regular-file-p
 	       (concat prefix desire-extension))
 
-	    ;;; Load configuration data.
+	    ;;; Load configuration data
 	      (desire-load-file (car dirs) pname)
 
 	      ;; Finished!
 	      (desired package)
-	      ;;(setq dirs nil)
-	      (setq dirs (cdr dirs)))
+	      (setq dirs nil))
 
 	   ;;; Check for configuration directory
 	     ((and (file-directory-p prefix)
@@ -570,15 +549,14 @@ then nothing happens and nil is returned."
 
 		  (desire-load-file prefix desire-loaddefs))
 
-	      ;; Setup processing of directory
+	      ;; Setup processing of directory.
 	      (eval-after-load
 		  lname
 		`(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
-	      ;;(setq dirs nil)
-	      (setq dirs (cdr dirs)))
+	      (setq dirs nil))
 
 	     ;; Otherwise
 
