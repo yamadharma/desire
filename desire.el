@@ -628,16 +628,9 @@ is the directory name with the prefix directory and extension removed."
   )
 
 (defun desire-readable-regular-file-p (f)
-
   "Determine if F is a readable, regular file."
-
-  (and
-   (if (fboundp 'file-regular-p)
-       (file-regular-p f)
-     t)
-   (file-readable-p  f)
-   )
-  )
+  (and (file-regular-p f)
+       (file-readable-p f)))
 
 (defun desire-readable-dir-p (dir)
   "Determine if DIR is a readable directory."
