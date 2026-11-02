@@ -89,6 +89,30 @@ The function `desired' will add an item to this list.")
 (defvar desire--precond nil
   "Internal: precondition library used by `desire'.")
 
+;;; Helpers
+(defvar desire-debug nil
+  "When non-nil, `desire' logs verbose diagnostic messages.
+Set this via `setq' or `customize' when troubleshooting package
+configuration.")
+
+(defvar desire--load-path-warned nil
+  "Set to t once the empty-`desire-load-path' warning has been shown.")
+
+(defmacro desire--debug (fmt &rest args)
+  "Log FMT/ARGS via `message' when `desire-debug' is non-nil."
+  (declare (indent 1) (debug t))
+  `(when desire-debug
+     (message ,fmt ,@args)))
+
+(defun desire--check-load-path ()
+  "Warn (once) if `desire-load-path' is empty."
+  (when (and (null desire-load-path)
+             (not desire--load-path-warned))
+    (setq desire--load-path-warned t)
+    (display-warning 'desire
+                     "`desire-load-path' is nil; no configuration files will be loaded."
+                     :warning)))
+
 ;;; package-vc backend
 (defvar desire-vc-keywords
   '(:fetcher :repo :rev :backend)
