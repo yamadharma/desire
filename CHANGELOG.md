@@ -1,3 +1,23 @@
+# [1.2.0](https://github.com/yamadharma/desire/compare/v1.1.1...v1.2.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* **desire:** add cosmetic ([e7d7b9b](https://github.com/yamadharma/desire/commit/e7d7b9b0ce0a7195e4e7adfc2368e8d5244a1bba))
+* **desire:** change desire-conf -\> deprecated positional wrapper around `desire' ([2a6cbff](https://github.com/yamadharma/desire/commit/2a6cbffabc1f06198e6c32b03bfae78ff7e340fc))
+* **desire:** fix desire header ([401f4a9](https://github.com/yamadharma/desire/commit/401f4a98306bc8d3679979c8578ac0961e85d022))
+* **desire:** fix desire-readable-regular-file-p ([59a183a](https://github.com/yamadharma/desire/commit/59a183af0d190bf816ab18010c7cb79f941fa26b))
+* **desire:** remove (out) ([24b7553](https://github.com/yamadharma/desire/commit/24b75534067f1128d22a9283e099f748900040a3))
+* **desire:** remove desire-core-lib ([7819fa3](https://github.com/yamadharma/desire/commit/7819fa333eefc357011740f5961228a5443dd582))
+
+
+### Features
+
+* **desire:** fix loading straight ([0a8187d](https://github.com/yamadharma/desire/commit/0a8187dbd1a606f1aa2b9882a973241fc2e1b500))
+* **desire:** split quelpa and straight ([4dc049c](https://github.com/yamadharma/desire/commit/4dc049cee5adb489da55cbb70ba3c352d9307ad9))
+
+
+
 ## [1.1.1](https://github.com/yamadharma/desire/compare/v1.1.0...v1.1.1) (2026-11-02)
 
 
