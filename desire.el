@@ -267,6 +267,8 @@ then nothing happens and nil is returned."
 	     )
       )
 
+  (desire--check-load-path)
+
   ;; check autoinstall key
   (if autoinstall
       ;; install package
