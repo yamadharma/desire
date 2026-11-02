@@ -31,7 +31,6 @@
 ;; the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
 
 (require 'cl-lib)
-(require 'desire-core-lib)
 (require 'desire-core-packages)
 
 (defvar desire-load-path nil
