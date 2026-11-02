@@ -760,18 +760,20 @@ is the directory name with the prefix directory and extension removed."
 ;;       )))
 
 (defun desire-install-package (package &optional recipe)
-  "Install PACKAGE from repository"
+  "Install PACKAGE from repository.
+RECIPE, when non-nil, selects a non-default install path according to
+`desire--recipe-type'.  `package-vc' recipes are delegated to
+`desire-vc--install'."
   (unless (package-installed-p package)
     (if recipe
-	(cond
-	 ((equal recipe-type "quelpa") (quelpa quelpa-recipe))
-	 ((equal recipe-type "straight") (straight-use-package straight-recipe))
-	 ((equal recipe-type "package") (package-vc-install vc-recipe)))
-      (progn
-	(package-refresh-contents)
-	(package-install package))
-      )))
-
+        (pcase desire--recipe-type
+          ("quelpa"   (quelpa desire--quelpa-recipe))
+          ("straight" (straight-use-package desire--straight-recipe))
+          ("package"  (apply #'desire-vc--install
+                             package
+                             (cdr desire--vc-recipe))))
+      (package-refresh-contents)
+      (package-install package))))
 
 (provide 'desire)
 
