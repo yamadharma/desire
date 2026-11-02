@@ -31,7 +31,9 @@
 ;; the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
 
 (require 'cl-lib)
-(require 'desire-core-packages)
+;; `desire-core-packages' is loaded lazily (see `desire--ensure-straight')
+;; so that straight.el is not bootstrapped unless `:pkgman straight' is
+;; actually requested.
 
 (defvar desire-load-path nil
   "*List of directories to be searched by `desire' for configuration data.")
@@ -596,31 +598,50 @@ member of `features', load the file FNAME instead."
   (or (require feature fname 1)
       (message "Package not found: %s" fname)))
 
-;; (defun desire-install-package (package recipe)
-;;   "Install PACKAGE from repository"
-;;   (unless (package-installed-p package)
-;;     (if recipe
-;;	(straight-use-package quelpa-recipe)
-;;       (progn
-;;	(package-refresh-contents)
-;;	(package-install package))
-;;       )))
+(defun desire--ensure-backend (recipe-type)
+  "Ensure the backend for RECIPE-TYPE is available.
+RECIPE-TYPE is a string, one of \"package\", \"quelpa\", \"straight\"."
+  (pcase recipe-type
+    ("straight"
+     (unless (fboundp 'straight-use-package)
+       (require 'desire-core-packages)
+       (desire-straight-ensure)))
+    ("quelpa"
+     (unless (fboundp 'quelpa)
+       (error "Package manager `quelpa' is not available; \
+install quelpa or use :pkgman `package' or `straight'")))
+    ("package" nil)
+    (_ (error "Unknown :pkgman %S" recipe-type))))
 
 (defun desire-install-package (package &optional recipe)
   "Install PACKAGE from repository.
 RECIPE, when non-nil, selects a non-default install path according to
-`desire--recipe-type'.  `package-vc' recipes are delegated to
-`desire-vc--install'."
+`desire--recipe-type'.  Package managers (`straight', `quelpa') are
+bootstrapped, not installed via `package.el'."
   (unless (package-installed-p package)
-    (if recipe
-        (pcase desire--recipe-type
-          ("quelpa"   (quelpa desire--quelpa-recipe))
-          ("straight" (straight-use-package desire--straight-recipe))
-          ("package"  (apply #'desire-vc--install
-                             package
-                             (cdr desire--vc-recipe))))
+    (cond
+     ;; Package managers: bootstrap, not package-install.
+     ((eq package 'straight)
+      (require 'desire-core-packages)
+      (when (fboundp 'desire-straight-ensure)
+        (desire-straight-ensure)))
+     ((eq package 'quelpa)
+      (error "`quelpa' is not installed and cannot be auto-installed \
+by `desire'; install it manually or via straight"))
+     ;; Normal recipe-driven install.
+     (recipe
+      (when (fboundp 'desire--ensure-backend)
+        (desire--ensure-backend desire--recipe-type))
+      (pcase desire--recipe-type
+        ("quelpa"   (quelpa desire--quelpa-recipe))
+        ("straight" (straight-use-package desire--straight-recipe))
+        ("package"  (apply #'desire-vc--install
+                           package
+                           (cdr desire--vc-recipe)))))
+     ;; Plain package.el fallback.
+     (t
       (package-refresh-contents)
-      (package-install package))))
+      (package-install package)))))
 
 (provide 'desire)
 
