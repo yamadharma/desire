@@ -8,9 +8,10 @@
 ;; Created:         20-Jun-1995
 
 ;; Keywords: setup configuration
+;; Package-Requires: ((emacs "29.1") (cl-lib "0.5"))
 
 ;; Copyright (C) 1995-2001 Martin Schwenke and Graham Williams
-;; Copyright (C) 2002-2025 Dmitry S. Kulyabov
+;; Copyright (C) 2002-2026 Dmitry S. Kulyabov
 
 ;; This file is NOT part of GNU Emacs.  It is, however, distributed
 ;; under the same conditions as GNU Emacs, which are as follows:
@@ -170,21 +171,21 @@ PACKAGE is added to the list `desirable' if:
 If PACKAGE is already `desirable', this is a no-op.  Always returns
 nil; use `desiredp' to query the state."
 
+  (declare (indent defun))
+
   (or (symbolp package)
       (error "Wrong type argument to `desired': symbolp, %s"
-	     (prin1-to-string package))
-      )
+	     (prin1-to-string package)))
 
   ;; Message: found executable precondition
-  (if precondition-system-executable
-      (if (executable-find precondition-system-executable)
-	  (message "Executable file found %s to load package %s"
-		   (prin1-to-string precondition-system-executable)
-		   (prin1-to-string package))
-	(message "Cannot find executable %s to load package %s"
-		 (prin1-to-string precondition-system-executable)
-		 (prin1-to-string package)))
-    nil)
+  (when precondition-system-executable
+    (if (executable-find precondition-system-executable)
+        (message "Executable file found %s to load package %s"
+                 precondition-system-executable
+                 package)
+      (message "Cannot find executable %s to load package %s"
+               precondition-system-executable
+               package)))
 
   ;; Check precondition
   (if (and
@@ -195,9 +196,8 @@ nil; use `desiredp' to query the state."
 	     nil)
 	 t)
        (if precondition-system-executable
-	   (if (stringp precondition-system-executable)
-	       (executable-find precondition-system-executable)
-	     nil)
+           (and (stringp precondition-system-executable)
+		(executable-find precondition-system-executable))
 	 t))
       (add-to-list 'desirable (symbol-name package))
     nil
@@ -323,6 +323,8 @@ therefore, marked as `desirable'.  Desirability can be checked using
 the function `desiredp'.  If PACKAGE has been previously `desired'
 then nothing happens and nil is returned."
 
+  (declare (indent defun))
+
   (or (symbolp package)
       (error "Wrong type argument to `desire': symbolp, %s"
 	     (prin1-to-string package)))
@@ -346,7 +348,7 @@ then nothing happens and nil is returned."
 	(cond
 	 (no-precondition-check nil)
 	 (precondition-lisp-library precondition-lisp-library)
-	 (t (prin1-to-string package))))
+	 (t (symbol-name package))))
 
   (desire--debug "precond: %s" desire--precond)
 
@@ -402,13 +404,13 @@ then nothing happens and nil is returned."
   (when precondition-system-executable
     (if (executable-find precondition-system-executable)
 	(desire--debug "Executable file found %s to load package %s"
-                       (prin1-to-string precondition-system-executable)
-                       (prin1-to-string package))
+                       precondition-system-executable
+                       package)
       (display-warning
        'desire
        (format "Cannot find executable %s required for package %s"
-               (prin1-to-string precondition-system-executable)
-               (prin1-to-string package))
+               precondition-system-executable
+               package)
        :warning)))
 
 ;;; Check precondition
@@ -487,26 +489,15 @@ then nothing happens and nil is returned."
 
 (defun desire-load-file (dir file)
   "Load FILE from DIR after appending `desire-extension'."
-
-  (load-file
-   (expand-file-name (concat file desire-extension) dir))
-  )
+  (load-file (expand-file-name (concat file desire-extension) dir)))
 
 (defun desire-load-dir (prefix dir)
   "Load files from PREFIX/DIR after appending `desire-dir-extension'."
-
-  (let
-      ((dir-list))
-    (setq dir-list
-	  (directory-files
-	   (expand-file-name (concat dir desire-dir-extension) prefix)
-	   t
-	   (concat ".*" (regexp-quote desire-extension) "$")))
-    (if (not (null dir-list))
-	(mapcar 'load-file
-		dir-list))
-    ) ;; end let
-  )
+  (let ((full-dir (expand-file-name (concat dir desire-dir-extension)
+                                    prefix))
+        (regexp (concat (regexp-quote desire-extension) "$")))
+    (dolist (file (directory-files full-dir t regexp))
+      (load-file file))))
 
 (defun desire-process-directory (dir)
 
@@ -564,66 +555,28 @@ loaded first.  A file for the pseudo-package specified by
       (desire-load-dir dir desire-execute))))
 
 (defun desire-directory-file-prefixes (dir)
-
   "Return the prefixes of configuration files in DIR.
-Configuration files are those that readable, regular files which have
-the extension specified by variable `desire-extension'.  The prefix
-is the file name with the directory and extension removed."
-
-  (let
-      (
-       (ext-regexp (concat (regexp-quote desire-extension) "$"))
-       )
-
-    (apply 'append
-	   (mapcar
-	    (function
-	     (lambda (f)
-	       (let ((full (expand-file-name f dir)))
-		 (if (and
-		      (desire-readable-regular-file-p full)
-		      (string-match ext-regexp f))
-		     (list (substring f 0 (string-match ext-regexp f)))))))
-	    (directory-files dir))
-	   )
-    )
-  )
+Configuration files are those that are readable, regular files with
+the extension specified by `desire-extension'.  The prefix is the file
+name with the directory and extension removed."
+  (let ((ext-regexp (concat (regexp-quote desire-extension) "$")))
+    (cl-loop for f in (directory-files dir)
+             for full = (expand-file-name f dir)
+             when (and (desire-readable-regular-file-p full)
+                       (string-match ext-regexp f))
+             collect (substring f 0 (string-match ext-regexp f)))))
 
 (defun desire-directory-dir-prefixes (dir)
-
-  ;;{{{ Description
-
   "Return the prefixes of configuration directories in DIR.
-Configuration directories are those that readable directories which have
-the extension specified by variable `desire-dir-extension'.  The prefix
-is the directory name with the prefix directory and extension removed."
-
-  ;;}}}
-
-  (let
-      (
-       (ext-regexp (concat (regexp-quote desire-dir-extension) "$"))
-       )
-
-    (apply 'append
-	   (mapcar
-	    (function
-	     (lambda (f)
-	       (let ((full (expand-file-name f dir)))
-		 (if (and
-		      (desire-readable-dir-p full)
-		      (string-match ext-regexp f)
-		      )
-		     (list (substring f 0 (string-match ext-regexp f)))
-		   )
-		 )
-	       )
-	     ) ;; end function
-	    (directory-files dir)
-	    )
-	   )
-    ) ;; end let
-  )
+Configuration directories are those that are readable directories with
+the extension specified by `desire-dir-extension'.  The prefix is the
+directory name with the parent directory and extension removed."
+  (let ((ext-regexp (concat (regexp-quote desire-dir-extension) "$")))
+    (cl-loop for f in (directory-files dir)
+             for full = (expand-file-name f dir)
+             when (and (desire-readable-dir-p full)
+                       (string-match ext-regexp f))
+             collect (substring f 0 (string-match ext-regexp f)))))
 
 (defun desire-readable-regular-file-p (f)
   "Determine if F is a readable, regular file."
@@ -632,20 +585,17 @@ is the directory name with the prefix directory and extension removed."
 
 (defun desire-readable-dir-p (dir)
   "Determine if DIR is a readable directory."
-  (and
-   (file-directory-p dir)
-   (file-readable-p dir)))
+  (and (file-directory-p dir)
+       (file-readable-p dir)))
 
 (defun desire-require (feature &optional fname)
   "Work like function require.
-  If feature FEATURE is not loaded, load it from FNAME.
-  If FEATURE is not a member of the list `features', then the feature
-  is not loaded; so load the file FNAME."
-  (if (not fname)
-      (setq fname (prin1-to-string feature)))
-  (if (require feature fname 1)
-      t
-    (message "Package not found : %s" fname)))
+If FEATURE is not loaded, load it from FNAME.  If FEATURE is not a
+member of `features', load the file FNAME instead."
+  (unless fname
+    (setq fname (symbol-name feature)))
+  (or (require feature fname 1)
+      (message "Package not found: %s" fname)))
 
 ;; (defun desire-install-package (package recipe)
 ;;   "Install PACKAGE from repository"
