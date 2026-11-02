@@ -101,13 +101,14 @@ The function `desired' will add an item to this list.")
 	    :sourcehut "https://git.sr.ht/~")
   "Places from where to fetch packages.")
 
-;; (cl-defun desire-vc--install (&key verbatim fetcher repo name rev backend)
-;;   "Thin wrapper around `package-vc-install'.
-;; This exists so we can have sane keywords arguments, yet don't
-;; have to go overboard when normalising."
-;;   (if verbatim
-;;       (package-vc-install verbatim)
-;;     (package-vc-install (concat fetcher repo) rev backend name)))
+(cl-defun desire-vc--install (package &key fetcher repo url name rev backend
+                                      &allow-other-keys)
+  "Install PACKAGE from a package-vc recipe.
+URL, if given, is used verbatim as the source URL; otherwise FETCHER
+and REPO are concatenated.  REV selects the revision, BACKEND the VC
+backend, NAME overrides PACKAGE as the package name."
+  (package-vc-install (or url (concat fetcher repo))
+                      rev backend (or name package)))
 
 (defun desire-vc--check-fetcher (val)
   "Check whether VAL is a correct `:fetcher' argument.
@@ -117,9 +118,8 @@ or a symbol representing one possible destination in
   (cond
    ((string-prefix-p "https://" val) val)
    ((plist-get desire-vc-fetchers (intern (concat ":" val))))
-   (t (use-package-error
-       (format ":fetcher is not a url or one of %s."
-	       (mapcar #'car desire-vc-fetchers))))))
+   (t (error ":fetcher is not a url or one of %s."
+             (mapcar #'car desire-vc-fetchers)))))
 
 (defun desire-vc--normalise-args (args)
   "Normalise the plist for vc-recipe."
@@ -310,7 +310,7 @@ then nothing happens and nil is returned."
 	      ;; Setup processing of directory.
 	      (eval-after-load
 		  lname
-		`(desire-process-directory, prefix))
+		`(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
@@ -400,85 +400,64 @@ then nothing happens and nil is returned."
 	     (prin1-to-string package)))
 
   ;; Set initial file/directory name
-  (setq fname initname)
+  (setq desire--fname initname)
 
   (message "initname: %s" initname)
-  (message "fname: %s" fname)
+  (message "fname: %s" desire--fname)
 
   ;; Set lisp library precondition
-  (if precondition-lisp-library
-      (setq precond precondition-lisp-library)
-    (setq precond (prin1-to-string package)))
+  (setq desire--precond
+	(if precondition-lisp-library
+            precondition-lisp-library
+          (prin1-to-string package)))
 
-  (message "precond: %s" precond)
+  (message "precond: %s" desire--precond)
 
 ;;; Set package manager
-  (if pkgman
-      (setq recipe-type (prin1-to-string pkgman))
-    (setq recipe-type "package"))
+  (setq desire--recipe-type
+	(cond ((null pkgman) "package")
+              ((symbolp pkgman) (symbol-name pkgman))
+              ((stringp pkgman) pkgman)
+              (t (error "Unsupported :pkgman %S" pkgman))))
 
-  (message "recipe-type: %s" recipe-type)
+  (message "recipe-type: %s" desire--recipe-type)
 
   ;; Use recipe
-  (if recipe
-      (cond
-       ;; straight-recipe
-       ((equal recipe-type "straight")
-	(progn
-      	  (setq straight-recipe nil)
-	  (setq straight-recipe (cons package recipe))))
-       ;; quelpa-recipe
-       ((equal recipe-type "quelpa")
-	(progn
-      	  (setq quelpa-recipe nil)
-	  (setq quelpa-recipe (cons package recipe))))
-       ;; vc-recipe
-       ((equal recipe-type "package")
-	(progn
-	  (setq vc-recipe nil)
-	  (setq desire-vc-plist (desire-vc--normalise-args recipe))
-	  (setq vc-recipe-url (concat (plist-get desire-vc-plist ':fetcher) (plist-get desire-vc-plist ':repo)))
-	  (setq vc-recipe (plist-put vc-recipe ':url vc-recipe-url))
-	  (if (plist-member desire-vc-plist ':branch)
-	      (progn
-		(setq vc-recipe-branch (plist-get desire-vc-plist ':branch))
-		(setq vc-recipe (plist-put vc-recipe ':branch vc-recipe-branch)))
-	    nil)
-	  (setq vc-recipe (cons package vc-recipe))))
-       )
-    nil)
+  (when recipe
+    (cond
+     ;; straight-recipe
+     ((equal desire--recipe-type "straight")
+      (setq desire--straight-recipe (cons package recipe)))
+     ;; quelpa-recipe
+     ((equal desire--recipe-type "quelpa")
+      (setq desire--quelpa-recipe (cons package recipe)))
+     ;; vc-recipe
+     ((equal desire--recipe-type "package")
+      (setq desire--vc-plist (desire-vc--normalise-args recipe))
+      (setq desire--vc-recipe (cons package desire--vc-plist)))))
 
-  ;; (when (and recipe (keywordp (car-safe recipe)))
-  ;;   (plist-put! plist :recipe `(quote ,recipe)))
-  (if recipe
-      (cond
-       ;; straight-recipe
-       ((equal recipe-type "straight")
-	(message "straight-recipe: package = %s ; recipe = %s ; straight-recipe =  %s" package recipe straight-recipe))
-       ;; quelpa-recipe
-       ((equal recipe-type "quelpa")
-	(message "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe =  %s" package recipe quelpa-recipe))
-       ;; vc-recipe
-       ((equal recipe-type "package")
-	(message "vc-recipe: package = %s ; recipe = %s ; vc-recipe =  %s" package recipe vc-recipe)))
-    nil)
+  (when recipe
+    (cond
+     ((equal desire--recipe-type "straight")
+      (message "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
+               package recipe desire--straight-recipe))
+     ((equal desire--recipe-type "quelpa")
+      (message "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
+               package recipe desire--quelpa-recipe))
+     ((equal desire--recipe-type "package")
+      (message "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
+               package recipe desire--vc-recipe))))
 
   ;; Check ensure key
-  (if ensure
-      ;; check if the package is already installed
-      (if (or
-	   (if (stringp package)
-	       (locate-library package)
-	     nil)
-	   (if (stringp precond)
-	       (locate-library precond)
-	     nil))
-	  t
-	;; install package
-	(if ensurename
-	    (desire-install-package ensurename recipe)
-	  (desire-install-package package recipe))
-	))
+  (when ensure
+    ;; check if the package is already installed
+    (if (or (package-installed-p package)
+            (locate-library (symbol-name package)))
+	t
+      ;; install package
+      (if ensurename
+          (desire-install-package ensurename recipe)
+	(desire-install-package package recipe))))
 
   (message "ensure: %s : %s; ensurename = %s " package ensure ensurename)
 
@@ -496,10 +475,9 @@ then nothing happens and nil is returned."
 ;;; Check precondition
   (if (and
        (not (desiredp package))
-       (if precond
-	   (if (stringp precond)
-	       (locate-library precond)
-	     nil)
+       (if desire--precond
+           (and (stringp desire--precond)
+		(locate-library desire--precond))
 	 t)
        (if precondition-system-executable
 	   (if (stringp precondition-system-executable)
@@ -509,10 +487,10 @@ then nothing happens and nil is returned."
       (let*
 	  ((dirs desire-load-path)
 	   (pname (symbol-name package))
-	   (lname (if fname fname pname)))
+	   (lname (if desire--fname desire--fname pname)))
 
 	(message "precondition: %s" precondition-lisp-library)
-	(message "precond: %s" precond)
+	(message "precond: %s" desire--precond)
 
 	;; ;; Check ensure key
 	;; (if ensure
@@ -569,10 +547,10 @@ then nothing happens and nil is returned."
 
 		  (desire-load-file prefix desire-loaddefs))
 
-	      ;; Setup processing of directory.
+	      ;; Setup processing of directory
 	      (eval-after-load
 		  lname
-		`(desire-process-directory, prefix))
+		`(desire-process-directory ,prefix))
 
 	      ;; Finished!
 	      (desired package)
@@ -782,18 +760,20 @@ is the directory name with the prefix directory and extension removed."
 ;;       )))
 
 (defun desire-install-package (package &optional recipe)
-  "Install PACKAGE from repository"
+  "Install PACKAGE from repository.
+RECIPE, when non-nil, selects a non-default install path according to
+`desire--recipe-type'.  `package-vc' recipes are delegated to
+`desire-vc--install'."
   (unless (package-installed-p package)
     (if recipe
-	(cond
-	 ((equal recipe-type "quelpa") (quelpa quelpa-recipe))
-	 ((equal recipe-type "straight") (straight-use-package straight-recipe))
-	 ((equal recipe-type "package") (package-vc-install vc-recipe)))
-      (progn
-	(package-refresh-contents)
-	(package-install package))
-      )))
-
+        (pcase desire--recipe-type
+          ("quelpa"   (quelpa desire--quelpa-recipe))
+          ("straight" (straight-use-package desire--straight-recipe))
+          ("package"  (apply #'desire-vc--install
+                             package
+                             (cdr desire--vc-recipe))))
+      (package-refresh-contents)
+      (package-install package))))
 
 (provide 'desire)
 
