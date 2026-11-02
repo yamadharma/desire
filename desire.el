@@ -372,10 +372,17 @@ Accepts the following properties:
     FNAME is a string containing the name of the file that, when loaded, will
     trigger dynamic loading of extra configuration files. If FNAME is
     omitted then the string corresponding to PACKAGE is used instead.
- :precondition PRECOND
-    PRECOND is name of lisp file as precondition for package loadind.
- :executable EXECUTABLE
-    EXECUTABLE is name of executable file as precondition for package loadind.
+ :precondition-lisp-library LIB
+    LIB is the name of a lisp library (a string) that must be
+    locatable via `locate-library' before configuration files for
+    PACKAGE are loaded.  Defaults to PACKAGE's name, so configuration
+    is only loaded when the package itself can already be found; this
+    prevents a `.ecf' file that `require's the package from failing
+    when the package is not installed.
+ :precondition-system-executable EXEC
+    EXEC is the name of an executable (a string) that must be present
+    (found via `executable-find') before configuration files for
+    PACKAGE are loaded.  A warning is issued if EXEC cannot be found.
  :ensurename PACKAGE-NAME Name of package on repository (like melpa).
  :autoinstall BOOL
     Specifies package autoinstallation.
@@ -421,6 +428,8 @@ then nothing happens and nil is returned."
   (or (symbolp package)
       (error "Wrong type argument to `desire': symbolp, %s"
 	     (prin1-to-string package)))
+
+  (desire--check-load-path)
 
   ;; Set initial file/directory name
   (setq desire--fname initname)
