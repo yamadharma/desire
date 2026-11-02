@@ -117,9 +117,8 @@ or a symbol representing one possible destination in
   (cond
    ((string-prefix-p "https://" val) val)
    ((plist-get desire-vc-fetchers (intern (concat ":" val))))
-   (t (use-package-error
-       (format ":fetcher is not a url or one of %s."
-	       (mapcar #'car desire-vc-fetchers))))))
+   (t (error ":fetcher is not a url or one of %s."
+             (mapcar #'car desire-vc-fetchers)))))
 
 (defun desire-vc--normalise-args (args)
   "Normalise the plist for vc-recipe."
