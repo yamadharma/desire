@@ -573,7 +573,6 @@ is the file name with the directory and extension removed."
   (let
       (
        (ext-regexp (concat (regexp-quote desire-extension) "$"))
-       (out)
        )
 
     (apply 'append
@@ -604,7 +603,6 @@ is the directory name with the prefix directory and extension removed."
   (let
       (
        (ext-regexp (concat (regexp-quote desire-dir-extension) "$"))
-       (out)
        )
 
     (apply 'append
