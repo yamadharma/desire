@@ -254,10 +254,10 @@ Equivalent modern call:
             (package &rest args)
             "desire.el 2025"))
   (desire package
-          :initname fname
-          :precondition-lisp-library precond
-          :no-precondition-check (null precond)
-          :ensure autoinstall))
+    :initname fname
+    :precondition-lisp-library precond
+    :no-precondition-check (null precond)
+    :ensure autoinstall))
 
 (cl-defun desire (package
 		  &key initname precondition-lisp-library precondition-system-executable
@@ -414,8 +414,8 @@ then nothing happens and nil is returned."
     (when precondition-system-executable
       (if (executable-find precondition-system-executable)
 	  (desire--debug "Executable file found %s to load package %s"
-			 precondition-system-executable
-			 package)
+	    precondition-system-executable
+	    package)
 	(display-warning
 	 'desire
 	 (format "Cannot find executable %s required for package %s"
@@ -462,7 +462,7 @@ then nothing happens and nil is returned."
 
 		;; Finished!
 		(desired package)
-		(setq dirs nil))
+		(setq dirs (cdr dirs)))
 
 	   ;;; Check for configuration directory
 	       ((and (file-directory-p prefix)
@@ -484,7 +484,7 @@ then nothing happens and nil is returned."
 
 		;; Finished!
 		(desired package)
-		(setq dirs nil))
+		(setq dirs (cdr dirs)))
 
 	       ;; Otherwise
 
