@@ -1,14 +1,13 @@
-;;; -*- mode: emacs-lisp; lexical-binding: t; coding: utf-8-unix; -*-
-;;; desire.el --- versatile configuration for emacs lisp packages
-
+;;; desire.el --- versatile configuration for Emacs Lisp packages  -*- lexical-binding: t; coding: utf-8-unix; -*-
 ;; Authors:         Martin Schwenke <martin@meltin.net>
 ;;                  Graham Williams <Graham.Williams@cmis.csiro.au>
 ;;		    Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Maintainer:      Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Created:         20-Jun-1995
-
-;; Keywords: setup configuration
-;; Package-Requires: ((emacs "29.1") (cl-lib "0.5"))
+;; Version:         1.3.0
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords: convenience, setup
+;; URL:             https://github.com/yamadharma/desire
 
 ;; Copyright (C) 1995-2001 Martin Schwenke and Graham Williams
 ;; Copyright (C) 2002-2026 Dmitry S. Kulyabov
@@ -29,6 +28,30 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with GNU Emacs; see the file COPYING.  If not, write to
 ;; the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+
+;;; Commentary:
+;;
+;; `desire' provides a declarative configuration front-end for Emacs
+;; Lisp packages.  Packages are marked desirable; their `.ecf' files
+;; (or `.ecd' directories) are discovered under `desire-load-path' and
+;; loaded lazily via `eval-after-load'.
+;;
+;; Basic usage:
+;;
+;;   (setq desire-load-path
+;;         (list (expand-file-name "desire" user-emacs-directory)))
+;;   (desire 'magit)
+;;   (desire 'some-pkg :pkgman 'straight
+;;           :recipe '(:fetcher github :repo "me/some-pkg"))
+;;
+;; Optional backends (loaded lazily, only when their `:pkgman' is used):
+;;   `desire-straight' — bootstrap and use straight.el recipes
+;;   `desire-quelpa'   — bootstrap and use quelpa recipes
+;;
+;; Minimum Emacs 29.1 is required because `desire' delegates
+;; `:pkgman package' recipes to `package-vc-install'.
+
+;;; Code:
 
 (require 'cl-lib)
 ;; Backend modules (`desire-straight', `desire-quelpa') are loaded
@@ -73,19 +96,14 @@ some final setup.")
   "A list of strings for packages which have been successfully desired.
 The function `desired' will add an item to this list.")
 
-;;; Internal state for the current `desire' invocation
 (defvar desire-precondition nil
   "*Precondition for package loading.")
-(defvar desire--recipe-type "package"
-  "Active package-manager type: \"package\", \"quelpa\" or \"straight\".")
-(defvar desire--straight-recipe nil
-  "Active straight.el recipe (PACKAGE . PLIST) for the current call.")
-(defvar desire--quelpa-recipe nil
-  "Active quelpa recipe (PACKAGE . PLIST) for the current call.")
-(defvar desire--vc-recipe nil
-  "Active package-vc recipe (PACKAGE . PLIST) for the current call.")
-(defvar desire--vc-plist nil
-  "Normalised recipe plist for the current `desire' call.")
+
+;;; Internal state for the current `desire' invocation.
+;; Recipe state (`recipe-type', `recipe-spec') is *not* kept in globals:
+;; it is constructed locally inside `desire' and passed explicitly to
+;; `desire-install-package'.  This makes `desire' reentrant and removes
+;; the risk of stale state leaking between calls.
 (defvar desire--fname nil
   "Internal: trigger file name used by `desire'.")
 (defvar desire--precond nil
@@ -236,10 +254,10 @@ Equivalent modern call:
             (package &rest args)
             "desire.el 2025"))
   (desire package
-          :initname fname
-          :precondition-lisp-library precond
-          :no-precondition-check (null precond)
-          :ensure autoinstall))
+    :initname fname
+    :precondition-lisp-library precond
+    :no-precondition-check (null precond)
+    :ensure autoinstall))
 
 (cl-defun desire (package
 		  &key initname precondition-lisp-library precondition-system-executable
@@ -353,140 +371,145 @@ then nothing happens and nil is returned."
 
   (desire--debug "precond: %s" desire--precond)
 
-;;; Set package manager
-  (setq desire--recipe-type
-	(cond ((null pkgman) "package")
-	      ((symbolp pkgman) (symbol-name pkgman))
-	      ((stringp pkgman) pkgman)
-	      (t (error "Unsupported :pkgman %S" pkgman))))
+  ;; Build a self-contained recipe spec: (TYPE . RECIPE).
+  ;;
+  ;; RECIPE layout depends on TYPE:
+  ;;   ("straight" . (PKG . PLIST))   – PKG is the Emacs package name
+  ;;   ("quelpa"   . (PKG . PLIST))   – same
+  ;;   ("package"  . (NAME . PLIST))  – NAME is the package-vc NAME arg
+  ;;
+  ;; For package-vc, NAME comes from `:ensurename' when supplied (that
+  ;; is the package-vc "name" under which the package is registered);
+  ;; for straight/quelpa the recipe itself already embeds the name, so
+  ;; `:ensurename' is ignored there.
+  (let* ((recipe-type
+          (cond ((null pkgman) "package")
+		((symbolp pkgman) (symbol-name pkgman))
+		((stringp pkgman) pkgman)
+		(t (error "Unsupported :pkgman %S" pkgman))))
+	 (install-name (or ensurename package))
+	 (recipe-spec
+          (when recipe
+            (cons recipe-type
+                  (pcase recipe-type
+                    ((or "straight" "quelpa") (cons package recipe))
+                    ("package" (cons install-name
+                                     (desire-vc--normalise-args recipe)))
+                    (_ (error "Unknown :pkgman %S" recipe-type)))))))
 
-  (desire--debug "recipe-type: %s" desire--recipe-type)
+    (desire--debug "recipe-type: %s" recipe-type)
+    (when recipe-spec
+      (desire--debug "recipe-spec: %s" recipe-spec))
 
-  ;; Use recipe
-  (when recipe
-    (cond
-     ;; straight-recipe
-     ((equal desire--recipe-type "straight")
-      (setq desire--straight-recipe (cons package recipe)))
-     ;; quelpa-recipe
-     ((equal desire--recipe-type "quelpa")
-      (setq desire--quelpa-recipe (cons package recipe)))
-     ;; vc-recipe
-     ((equal desire--recipe-type "package")
-      (setq desire--vc-plist (desire-vc--normalise-args recipe))
-      (setq desire--vc-recipe (cons package desire--vc-plist)))))
+    ;; Ensure PACKAGE is installed (and use INSTALL-NAME for `package-vc').
+    (when ensure
+      (if (or (package-installed-p package)
+              (locate-library (symbol-name package)))
+	  t
+	(desire-install-package install-name recipe-spec)))
 
-  (when recipe
-    (cond
-     ((equal desire--recipe-type "straight")
-      (desire--debug "straight-recipe: package = %s ; recipe = %s ; straight-recipe = %s"
-                     package recipe desire--straight-recipe))
-     ((equal desire--recipe-type "quelpa")
-      (desire--debug "quelpa-recipe: package = %s ; recipe = %s ; quelpa-recipe = %s"
-                     package recipe desire--quelpa-recipe))
-     ((equal desire--recipe-type "package")
-      (desire--debug "vc-recipe: package = %s ; recipe = %s ; vc-recipe = %s"
-                     package recipe desire--vc-recipe))))
-
-  ;; Check ensure key
-  (when ensure
-    ;; check if the package is already installed
-    (if (or (package-installed-p package)
-            (locate-library (symbol-name package)))
-	t
-      ;; install package
-      (if ensurename
-          (desire-install-package ensurename recipe)
-	(desire-install-package package recipe))))
-
-  (desire--debug "ensure: %s : %s; ensurename = %s" package ensure ensurename)
+    (desire--debug "ensure: %s : %s; ensurename = %s" package ensure ensurename)
 
 ;;; Executable precondition diagnostics
-  (when precondition-system-executable
-    (if (executable-find precondition-system-executable)
-	(desire--debug "Executable file found %s to load package %s"
-                       precondition-system-executable
-                       package)
-      (display-warning
-       'desire
-       (format "Cannot find executable %s required for package %s"
-               precondition-system-executable
-               package)
-       :warning)))
+    (when precondition-system-executable
+      (if (executable-find precondition-system-executable)
+	  (desire--debug "Executable file found %s to load package %s"
+	    precondition-system-executable
+	    package)
+	(display-warning
+	 'desire
+	 (format "Cannot find executable %s required for package %s"
+		 precondition-system-executable
+		 package)
+	 :warning)))
 
 ;;; Check precondition
-  (if (and
-       (not (desiredp package))
-       (if desire--precond
-           (and (stringp desire--precond)
-		(locate-library desire--precond))
-	 t)
-       (if precondition-system-executable
-	   (if (stringp precondition-system-executable)
-	       (executable-find precondition-system-executable)
-	     nil)
-	 t))
-      (let*
-	  ((dirs desire-load-path)
-	   (pname (symbol-name package))
-	   (lname (if desire--fname desire--fname pname)))
+    (if (and
+	 (not (desiredp package))
+	 (if desire--precond
+             (and (stringp desire--precond)
+		  (locate-library desire--precond))
+	   t)
+	 (if precondition-system-executable
+	     (if (stringp precondition-system-executable)
+		 (executable-find precondition-system-executable)
+	       nil)
+	   t))
+	(let*
+	    ((dirs desire-load-path)
+	     (pname (symbol-name package))
+	     (lname (if desire--fname desire--fname pname)))
 
-	(desire--debug "precondition: %s" precondition-lisp-library)
-	(desire--debug "precond: %s" desire--precond)
+	  (desire--debug "precondition: %s" precondition-lisp-library)
+	  (desire--debug "precond: %s" desire--precond)
 
-	;; NOTE: PACKAGE is deliberately *not* marked `desired' here.
-	;; It is marked inside each successful branch of the `cond' below,
-	;; so that a package whose configuration could not be found stays
-	;; un-desired and can be retried later.  This matches `desire-conf'.
-	;; (desired package)
+	  ;; Mark PACKAGE desirable even if no per-package configuration file
+	  ;; exists.  `desire' expresses *intent*: the caller wants PACKAGE in
+	  ;; the desirable set.  Cross-package configurations such as
+	  ;; `org/foo.ecf' are loaded by `desire-process-directory' when `org'
+	  ;; is loaded -- but only if `foo' is already in `desirable' at that
+	  ;; point.  If we refused to mark `foo' merely because there is no
+	  ;; `foo.ecf' or `foo/', those cross-package files would silently never
+	  ;; load.  The "no config found" case is reported via `desire--debug',
+	  ;; not by silently dropping the package from `desirable'.
+	  (desired package)
 
-	(while dirs
-	  (let ((prefix (expand-file-name pname (car dirs))))
+	  (when desire-debug
+	    (unless (or (member (symbol-name package) desirable)
+			;; `desired' just added it, so the only way to reach
+			;; here is precondition failure upstream.
+			nil)
+	      (desire--debug "package %s marked desirable without a config file"
+                package)))
 
-	    (cond
+	  (while dirs
+	    (let ((prefix (expand-file-name pname (car dirs))))
+
+	      (cond
 	   ;;; Check for configuration file
-	     ((desire-readable-regular-file-p
-	       (concat prefix desire-extension))
+	       ((desire-readable-regular-file-p
+		 (concat prefix desire-extension))
 
 	    ;;; Load configuration data
-	      (desire-load-file (car dirs) pname)
+		(desire-load-file (car dirs) pname)
 
-	      ;; Finished!
-	      (desired package)
-	      (setq dirs nil))
+		;; Finished!
+		(desired package)
+		(setq dirs (cdr dirs)))
 
 	   ;;; Check for configuration directory
-	     ((and (file-directory-p prefix)
-		   (file-readable-p prefix))
+	       ((and (file-directory-p prefix)
+		     (file-readable-p prefix))
 
 	    ;;; If file specified by desire-loaddefs exists then load it.
-	      (if (and desire-loaddefs
-		       (desire-readable-regular-file-p
-			(expand-file-name
-			 (concat desire-loaddefs desire-extension)
-			 prefix)))
+		(if (and desire-loaddefs
+			 (desire-readable-regular-file-p
+			  (expand-file-name
+			   (concat desire-loaddefs desire-extension)
+			   prefix)))
 
-		  (desire-load-file prefix desire-loaddefs))
+		    (desire-load-file prefix desire-loaddefs))
 
-	      ;; Setup processing of directory.
-	      (eval-after-load
-		  lname
-		`(desire-process-directory ,prefix))
+		;; Setup processing of directory.
+		(eval-after-load
+		    lname
+		  `(desire-process-directory ,prefix))
 
-	      ;; Finished!
-	      (desired package)
-	      (setq dirs nil))
+		;; Finished!
+		(desired package)
+		(setq dirs (cdr dirs)))
 
-	     ;; Otherwise
+	       ;; Otherwise
 
-	     (t
-	      (setq dirs (cdr dirs)))
-	     ) ;; end cond
-	    ) ;; end let
-	  ) ;; end while
-	) ;; end let*
-    ) ;; end if
-  ) ;; end defun desire
+	       (t
+		(setq dirs (cdr dirs)))
+	       ) ;; end cond
+	      ) ;; end let
+	    ) ;; end while
+	  ) ;; end let*
+      ) ;; end if
+    ) ;; end defun desire
+  )
 
 (defun desire-load-file (dir file)
   "Load FILE from DIR after appending `desire-extension'."
@@ -501,37 +524,39 @@ then nothing happens and nil is returned."
       (load-file file))))
 
 (defun desire-process-directory (dir)
-
   "Load files in DIR if they correspond to desirable packages.
 
-If a configuration file for a previously desired package is present in
-DIR, then that file is loaded.  For example, if a package called
-\"goodthing\" has previously been desired, then if a file exists in
-DIR called \"goodthing\" (plus `desire-extension') it will be loaded.
-If \"goodthing\" has not previously been desired, then this file will
-be ignored.
+Files for previously desired packages are loaded in the order in which
+those packages became desirable -- that is, in the order of `(desire
+...)' calls, *not* the alphabetical order of the filenames.  For
+example, given
 
-A file for the pseudo-package specified by `desire-desire' is always
-loaded first.  A file for the pseudo-package specified by
-`desire-execute' is always loaded last."
+    (desire 'b-package)
+    (desire 'a-package)
 
-  (let
-      ((fs (desire-directory-file-prefixes dir))
-       (ds (desire-directory-dir-prefixes dir))
-       exec-file
-       exec-dir)
+the files `DIR/b-package.ecf' and `DIR/a-package.ecf' will be loaded
+in that order, despite `a' sorting before `b'.
 
-    ;; Check for the desire-desire file.
+If both `DIR/PKG.ecf' and `DIR/PKG.ecd/' exist, the file is loaded
+first, then the directory.
+
+Pseudo-packages are special:
+  `desire-desire' is always loaded first (file and/or directory form);
+  `desire-execute' is always loaded last  (file and/or directory form)."
+
+  (let ((fs (desire-directory-file-prefixes dir))
+        (ds (desire-directory-dir-prefixes dir))
+        exec-file exec-dir)
+
+    ;; 1. `desire-desire': always first.
     (when (member desire-desire fs)
       (desire-load-file dir desire-desire)
       (setq fs (delete desire-desire fs)))
-
-    ;; Check for the desire-desire dir.
     (when (member desire-desire ds)
       (desire-load-dir dir desire-desire)
       (setq ds (delete desire-desire ds)))
 
-    ;; Check for the desire-execute file and dir (both supported).
+    ;; 2. Defer `desire-execute' to the very end.
     (when (member desire-execute fs)
       (setq exec-file t)
       (setq fs (delete desire-execute fs)))
@@ -539,17 +564,26 @@ loaded first.  A file for the pseudo-package specified by
       (setq exec-dir t)
       (setq ds (delete desire-execute ds)))
 
-    ;; Load desirable files.
-    (dolist (f fs)
-      (when (desiredp f)
-	(desire-load-file dir f)))
+    ;; 3. Iterate over desirable packages in insertion order.
+    ;;
+    ;; `desired' uses `add-to-list', which PREPENDS: the newest entry
+    ;; is first in `desirable', the oldest last.  `(reverse desirable)'
+    ;; therefore yields the order in which `(desire ...)' was called.
+    ;; We consume `fs' and `ds' as sets: once loaded, an entry is
+    ;; removed so a package cannot be re-loaded through a stale fs/ds.
+    (dolist (pkg (reverse desirable))
+      (when (member pkg fs)
+        (desire--debug "desire-process-directory: file %s/%s%s"
+          dir pkg desire-extension)
+        (desire-load-file dir pkg)
+        (setq fs (delete pkg fs)))
+      (when (member pkg ds)
+        (desire--debug "desire-process-directory: dir  %s/%s%s/"
+          dir pkg desire-dir-extension)
+        (desire-load-dir dir pkg)
+        (setq ds (delete pkg ds))))
 
-    ;; Load desirable dirs.
-    (dolist (d ds)
-      (when (desiredp d)
-	(desire-load-dir dir d)))
-
-    ;; Load desire-execute last (file then dir).
+    ;; 4. `desire-execute': always last.
     (when exec-file
       (desire-load-file dir desire-execute))
     (when exec-dir
@@ -564,7 +598,7 @@ name with the directory and extension removed."
     (cl-loop for f in (directory-files dir)
              for full = (expand-file-name f dir)
              when (and (desire-readable-regular-file-p full)
-                       (string-match ext-regexp f))
+		       (string-match ext-regexp f))
              collect (substring f 0 (string-match ext-regexp f)))))
 
 (defun desire-directory-dir-prefixes (dir)
@@ -576,7 +610,7 @@ directory name with the parent directory and extension removed."
     (cl-loop for f in (directory-files dir)
              for full = (expand-file-name f dir)
              when (and (desire-readable-dir-p full)
-                       (string-match ext-regexp f))
+		       (string-match ext-regexp f))
              collect (substring f 0 (string-match ext-regexp f)))))
 
 (defun desire-readable-regular-file-p (f)
@@ -610,29 +644,37 @@ Backend modules are loaded lazily on first use."
     ("package"  nil)
     (_ (error "Unknown :pkgman %S" recipe-type))))
 
-(defun desire-install-package (package &optional recipe)
-  "Install PACKAGE from repository.
-RECIPE, when non-nil, selects a non-default install path according to
-`desire--recipe-type'.  Package managers (`straight', `quelpa') are
-bootstrapped, not installed via `package.el'."
+(cl-defun desire-install-package (package &optional recipe-spec)
+  "Install PACKAGE.
+PACKAGE is a symbol naming the package as known to `package.el'; for
+`package-vc' installs this is the registered NAME under which the
+package will be installed.
+
+RECIPE-SPEC, when non-nil, is a cons (TYPE . RECIPE) where TYPE is
+one of the strings \"straight\", \"quelpa\" or \"package\", and RECIPE
+is the backend-specific, pre-normalised recipe constructed by
+`desire'.  RECIPE-SPEC is what selects a non-default install path;
+when it is nil, PACKAGE is installed via plain `package-install'.
+
+Package managers themselves (`straight', `quelpa') are bootstrapped,
+not installed via `package.el'; passing them as PACKAGE is supported
+for convenience."
   (unless (package-installed-p package)
     (cond
-     ;; Backends themselves: bootstrap, don't try to install from ELPA.
+     ;; Backends themselves: bootstrap, do not try `package-install'.
      ((eq package 'straight)
       (require 'desire-straight)
       (desire-straight-ensure))
      ((eq package 'quelpa)
       (require 'desire-quelpa)
       (desire-quelpa-ensure))
-     ;; Recipe-driven install.
-     (recipe
-      (desire--ensure-backend desire--recipe-type)
-      (pcase desire--recipe-type
-        ("quelpa"   (desire-quelpa-use-package desire--quelpa-recipe))
-        ("straight" (desire-straight-use-package desire--straight-recipe))
-        ("package"  (apply #'desire-vc--install
-                           package
-                           (cdr desire--vc-recipe)))))
+     ;; Recipe-driven install: all state comes from RECIPE-SPEC.
+     (recipe-spec
+      (pcase (car recipe-spec)
+        ("straight" (desire-straight-use-package (cdr recipe-spec)))
+        ("quelpa"   (desire-quelpa-use-package (cdr recipe-spec)))
+        ("package"  (apply #'desire-vc--install (cdr recipe-spec)))
+        (other      (error "Unknown recipe type: %S" other))))
      ;; Plain package.el fallback.
      (t
       (package-refresh-contents)
@@ -640,4 +682,4 @@ bootstrapped, not installed via `package.el'."
 
 (provide 'desire)
 
-;;;
+;;; desire.el ends here
