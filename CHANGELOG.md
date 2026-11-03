@@ -1,3 +1,14 @@
+# [1.3.0](https://github.com/yamadharma/desire/compare/v1.2.0...v1.3.0) (2026-11-03)
+
+### Bug Fixes
+
+* **desire:** fix ecf-mule ([08044d7](https://github.com/yamadharma/desire/commit/08044d74b74c0979d975ced2875260b399c48b7b))
+* **desire:** revert seeking many directories ([3dcccc4](https://github.com/yamadharma/desire/commit/3dcccc467e26f8c8065add800737daf8ae74fcc4))
+
+### Features
+
+* **main:** add check-version ([d29b7e1](https://github.com/yamadharma/desire/commit/d29b7e14015047564a012d5818ba275dba3831d2))
+
 # [1.2.0](https://github.com/yamadharma/desire/compare/v1.1.1...v1.2.0) (2026-11-02)
 
 

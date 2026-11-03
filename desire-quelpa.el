@@ -1,6 +1,6 @@
 ;;; desire-quelpa.el --- quelpa backend for desire  -*- lexical-binding: t; coding: utf-8-unix; -*-
 
-;; Version:         1.2.0
+;; Version:         1.3.0
 ;; Package-Requires: ((emacs "24.3"))
 ;; Keywords: convenience
 ;; URL:             https://github.com/yamadharma/desire
