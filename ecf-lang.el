@@ -1,177 +1,48 @@
-;;; ecf-lang.el -*- coding: iso-2022-7bit-unix; -*-
+;;; ecf-lang.el --- locale detection for desire  -*- lexical-binding: t; coding: utf-8-unix -*-
 
-;; function name: suffix-cut-from
-;;   Cuts str after mychar and return.
-;;   Returns nil when mychar is not in str.
-(defun suffix-cut-from (str mychar)
-  (let 
-    (
-      (ret nil)
-      (counter 0)
-    )
-    (while (< counter (length str))
-      (if (string= (substring str counter (1+ counter)) mychar)
-	(setq ret counter)
-      )
-      (setq counter (1+ counter))
-    )
-    (if ret
-	(setq ret (substring str 0 ret))
-    )
-    ret
-  )
-)
-
-;; function name: prefix-cut-from
-;;   Cuts str befor mychar and return.
-;;   Returns nil when mychar is not in str.
-(defun prefix-cut-from (str mychar)
-  (let 
-    (
-      (ret nil)
-      (counter 0)
-    )
-    (while (< counter (length str))
-      (if (string= (substring str counter (1+ counter)) mychar)
-	(setq ret counter)
-      )
-      (setq counter (1+ counter))
-    )
-    (if ret
-	(setq ret (substring str (1+ ret) (length str)))
-    )
-    ret
-  )
-)
-
+;;; Commentary:
 ;;
-;; Test cases for suffix-cut-from
-;; (eval (suffix-cut-from ("ja_JP.eucJP", "."))
-;; (eval (suffix-cut-from ("ja_JP.eucJP", "_")))
-;; (eval (suffix-cut-from ("ja_JP.eucJP", "nonexit")
+;; Exports two variables used by `rc.desire.el' (to build language
+;; overlay directories) and by `ecf-mule.el' (to load per-locale
+;; code pages):
 ;;
+;;   ecf-lang       -- detected locale string, e.g. "ru_RU.UTF-8"
+;;   ecf-lang-list  -- candidate config basenames, from most general
+;;                     ("ru") to most specific ("ru_ru.utf-8").
+;;
+;; `ecf-lang-list' is consumed as follows:
+;;
+;;   rc.desire.el: (mapcar (lambda (x) (concat "lang/" x)) ecf-lang-list)
+;;                 -> desire-lang-load-path, e.g. "lang/ru", "lang/utf-8"
+;;
+;;   ecf-mule.el:  (mapcar (lambda (x) (concat "ecf-mule/" x ".el"))
+;;                         ecf-lang-list)
+;;                 -> loads ecf-mule/ru.el, ecf-mule/utf-8.el, ...
 
-;; Where is the system dot-emacs for languages
-(let 
-  (
-    (lang)
-    (dot-cands-list nil)
-  )
+;;; Code:
 
-  ;; w32-system-coding-system = cp1251
-  (setq lang
-    (if (eq system-type 'windows-nt)
-      (cond
-        ;; Russian
-        ((equal (w32-get-current-locale-id) 1049)
-          "ru_RU.CP1251"
-        )
-      )
-      ;; else
+(defvar ecf-lang
+  (or (and (eq system-type 'windows-nt)
+           (fboundp 'w32-get-current-locale-id)
+           (equal (w32-get-current-locale-id) 1049)
+           "ru_RU.CP1251")
       (getenv "LANG")
-    ) ; end if
-  )
+      "C")
+  "Detected locale string, e.g. \"ru_RU.UTF-8\".")
 
-  (setq system-dot-emacs
-    (downcase 
-      "ecf-mule/"
-    )
-  )      
-
-;  (setq system-dot-emacs
-;    (downcase 
-;      (concat "ecf-mule/" (suffix-cut-from lang "_") "/")
-;    )
-;  )      
-
-;  (setq system-dot-emacs "")
-
-  ;; Exactly match (in downcase) (i.e. ja_jp.eucjp)
-  (setq dot-cands-list 
-    (list 
-      (downcase 
-;        (concat system-dot-emacs lang ".el")
-        lang
-      )
-    )
-  )
-
-  ;; Only codeset match (in downcase) (i.e. eucjp)  
-  (if (stringp (prefix-cut-from lang "."))
-    (setq dot-cands-list
-      (append 
-        (list 
-          (downcase
-;            (concat system-dot-emacs (prefix-cut-from lang ".") ".el")
-            (prefix-cut-from lang ".")
-   	  )
-        )
-	dot-cands-list
-      )
-    )
-  )
-
-  ;; Without codeset match (in downcase) (i.e. ja_jp)
-  (if (stringp (suffix-cut-from lang "."))
-    (setq dot-cands-list
-      (append 
-        (list 
-          (downcase
-;            (concat system-dot-emacs (suffix-cut-from lang ".") ".el")
-            (suffix-cut-from lang ".")
-   	  )
-        )
-	dot-cands-list
-      )
-    )
-  )
-  
-  ;; Just language name (in downcase) (i.e. ja)
-  (if (stringp (suffix-cut-from lang "_"))
-    (setq dot-cands-list
-      (append 
-        (list 
-          (downcase
-;            (concat system-dot-emacs (suffix-cut-from lang "_") ".el")
-            (suffix-cut-from lang "_")
-	  )
-        )
-	dot-cands-list
-      )
-    )
-  )
-  
-  ;; Default
-;(setq dot-cands-list
-;(append dot-cands-list (list (concat system-dot-emacs ".el"))))
-  ;;(append dot-cands-list)
-
-;; Set global variables
-  (setq ecf-lang 
-    lang)
-  (setq ecf-lang-list
-    dot-cands-list)
-
-;;
-;  (setq dot-cands-list
-;    (mapcar (function (lambda (x) (concat system-dot-emacs x ".el"))) dot-cands-list)
-;  )    
-;  
-;  (while (consp dot-cands-list)
-;    (if (locate-library (car dot-cands-list))
-;      (prog1 
-;        (load (car dot-cands-list))
-;        (setq dot-cands-list 
-;    	  (cdr dot-cands-list)
-;	)	  
-;;        (setq dot-cands-list nil)
-;      )
-;      (setq dot-cands-list 
-;        (cdr dot-cands-list)
-;      )
-;    )
-;  )
-) ;; let ends here
+(defvar ecf-lang-list
+  (let* ((lang       ecf-lang)
+         (no-codeset (and (string-match "\\`\\([^.]+\\)" lang)
+                          (match-string 1 lang)))
+         (lang-only  (and (string-match "\\`\\([^_.]+\\)" lang)
+                          (match-string 1 lang)))
+         (codeset    (and (string-match "\\.\\([^@]+\\)" lang)
+                          (match-string 1 lang)))
+         (all        (list lang no-codeset lang-only codeset)))
+    ;; "ru" (language) -> "ru_ru" (lang+region) ->
+    ;; "utf-8" (codeset) -> "ru_ru.utf-8" (full locale)
+    (delete-dups (delq nil (mapcar #'downcase all))))
+  "Candidate config basenames, from most general to most specific.")
 
 (provide 'ecf-lang)
 

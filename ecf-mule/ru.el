@@ -1,55 +1,25 @@
-;; ecf-mule/ru.el -*- coding: iso-2022-7bit-unix; -*-
+;;; ru.el --- Russian language environment for desire  -*- lexical-binding: t; coding: utf-8-unix -*-
 
-(if (< emacs-major-version 23)
-(if 
-    (assoc "866" (cp-supported-codepages))
-    (codepage-setup 866)
-)
-nil
-) ;; END if
+;;; Commentary:
+;; Sets up Russian input and language environment.  Assumes UTF-8
+;; locale; for CP1251 see cp1251.el.
 
-(if (< emacs-major-version 23)
-(if 
-    (assoc "1251" (cp-supported-codepages))
-    (progn
-	(codepage-setup 1251)
-	(define-coding-system-alias 'windows-1251 'cp1251)
-	(define-coding-system-alias 'win-1251 'cp1251)
-    ) ;; END progn
-    nil	
-) ;; END if
-nil
-) ;; END if
+;;; Code:
 
-;;{{{ Create Cyrillic-CP1251 Language Environment menu item
+(set-language-environment "Russian")
+
+(setq default-input-method "russian-computer")
 
 (set-language-info-alist
-  "Cyrillic-CP1251" 
-  `(
-     (charset cyrillic-iso8859-5)
-     (coding-system cp1251)
-     (coding-priority cp1251)
-     (input-method . "cyrillic-jcuken")
-     (features cyril-util)
-     (unibyte-display . cp1251)
-     (sample-text . "Russian (òÕÓÓËÉÊ)    úÄÒÁ×ÓÔ×ÕÊÔÅ!")
-     (documentation . "Support for Cyrillic CP1251.")
-  )
-  '("Cyrillic")
-)
+ "Russian"
+ `((charset cyrillic-iso8859-5)
+   (coding-system utf-8)
+   (coding-priority utf-8)
+   (input-method . "russian-computer")
+   (sample-text . "Russian (Ð ÑƒÑÑÐºÐ¸Ð¹)     ÐŸÑ€Ð¸Ð²ÐµÑ‚ÑÑ‚Ð²Ð¸Ðµ!")
+   (documentation . "Support for Russian."))
+ '("Cyrillic"))
 
-;;}}}
-;;{{{
+(provide 'ecf-mule/ru)
 
-(if (>= emacs-major-version 22)
-  (set-input-method 'russian-computer)
-  (set-input-method 'cyrillic-jcuken)
-)
-
-;;}}}
-
-
-(define-coding-system-alias 'koi8-u 'koi8-r)
-
-;;
-
+;;; ru.el ends here

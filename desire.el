@@ -443,11 +443,24 @@ then nothing happens and nil is returned."
 	  (desire--debug "precondition: %s" precondition-lisp-library)
 	  (desire--debug "precond: %s" desire--precond)
 
-	  ;; NOTE: PACKAGE is deliberately *not* marked `desired' here.
-	  ;; It is marked inside each successful branch of the `cond' below,
-	  ;; so that a package whose configuration could not be found stays
-	  ;; un-desired and can be retried later.  This matches `desire-conf'.
-	  ;; (desired package)
+	  ;; Mark PACKAGE desirable even if no per-package configuration file
+	  ;; exists.  `desire' expresses *intent*: the caller wants PACKAGE in
+	  ;; the desirable set.  Cross-package configurations such as
+	  ;; `org/foo.ecf' are loaded by `desire-process-directory' when `org'
+	  ;; is loaded -- but only if `foo' is already in `desirable' at that
+	  ;; point.  If we refused to mark `foo' merely because there is no
+	  ;; `foo.ecf' or `foo/', those cross-package files would silently never
+	  ;; load.  The "no config found" case is reported via `desire--debug',
+	  ;; not by silently dropping the package from `desirable'.
+	  (desired package)
+
+	  (when desire-debug
+	    (unless (or (member (symbol-name package) desirable)
+			;; `desired' just added it, so the only way to reach
+			;; here is precondition failure upstream.
+			nil)
+	      (desire--debug "package %s marked desirable without a config file"
+                package)))
 
 	  (while dirs
 	    (let ((prefix (expand-file-name pname (car dirs))))
@@ -511,37 +524,39 @@ then nothing happens and nil is returned."
       (load-file file))))
 
 (defun desire-process-directory (dir)
-
   "Load files in DIR if they correspond to desirable packages.
 
-If a configuration file for a previously desired package is present in
-DIR, then that file is loaded.  For example, if a package called
-\"goodthing\" has previously been desired, then if a file exists in
-DIR called \"goodthing\" (plus `desire-extension') it will be loaded.
-If \"goodthing\" has not previously been desired, then this file will
-be ignored.
+Files for previously desired packages are loaded in the order in which
+those packages became desirable -- that is, in the order of `(desire
+...)' calls, *not* the alphabetical order of the filenames.  For
+example, given
 
-A file for the pseudo-package specified by `desire-desire' is always
-loaded first.  A file for the pseudo-package specified by
-`desire-execute' is always loaded last."
+    (desire 'b-package)
+    (desire 'a-package)
 
-  (let
-      ((fs (desire-directory-file-prefixes dir))
-       (ds (desire-directory-dir-prefixes dir))
-       exec-file
-       exec-dir)
+the files `DIR/b-package.ecf' and `DIR/a-package.ecf' will be loaded
+in that order, despite `a' sorting before `b'.
 
-    ;; Check for the desire-desire file.
+If both `DIR/PKG.ecf' and `DIR/PKG.ecd/' exist, the file is loaded
+first, then the directory.
+
+Pseudo-packages are special:
+  `desire-desire' is always loaded first (file and/or directory form);
+  `desire-execute' is always loaded last  (file and/or directory form)."
+
+  (let ((fs (desire-directory-file-prefixes dir))
+        (ds (desire-directory-dir-prefixes dir))
+        exec-file exec-dir)
+
+    ;; 1. `desire-desire': always first.
     (when (member desire-desire fs)
       (desire-load-file dir desire-desire)
       (setq fs (delete desire-desire fs)))
-
-    ;; Check for the desire-desire dir.
     (when (member desire-desire ds)
       (desire-load-dir dir desire-desire)
       (setq ds (delete desire-desire ds)))
 
-    ;; Check for the desire-execute file and dir (both supported).
+    ;; 2. Defer `desire-execute' to the very end.
     (when (member desire-execute fs)
       (setq exec-file t)
       (setq fs (delete desire-execute fs)))
@@ -549,17 +564,26 @@ loaded first.  A file for the pseudo-package specified by
       (setq exec-dir t)
       (setq ds (delete desire-execute ds)))
 
-    ;; Load desirable files.
-    (dolist (f fs)
-      (when (desiredp f)
-	(desire-load-file dir f)))
+    ;; 3. Iterate over desirable packages in insertion order.
+    ;;
+    ;; `desired' uses `add-to-list', which PREPENDS: the newest entry
+    ;; is first in `desirable', the oldest last.  `(reverse desirable)'
+    ;; therefore yields the order in which `(desire ...)' was called.
+    ;; We consume `fs' and `ds' as sets: once loaded, an entry is
+    ;; removed so a package cannot be re-loaded through a stale fs/ds.
+    (dolist (pkg (reverse desirable))
+      (when (member pkg fs)
+        (desire--debug "desire-process-directory: file %s/%s%s"
+          dir pkg desire-extension)
+        (desire-load-file dir pkg)
+        (setq fs (delete pkg fs)))
+      (when (member pkg ds)
+        (desire--debug "desire-process-directory: dir  %s/%s%s/"
+          dir pkg desire-dir-extension)
+        (desire-load-dir dir pkg)
+        (setq ds (delete pkg ds))))
 
-    ;; Load desirable dirs.
-    (dolist (d ds)
-      (when (desiredp d)
-	(desire-load-dir dir d)))
-
-    ;; Load desire-execute last (file then dir).
+    ;; 4. `desire-execute': always last.
     (when exec-file
       (desire-load-file dir desire-execute))
     (when exec-dir
