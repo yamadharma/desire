@@ -2161,12 +2161,20 @@ Input:
 ;;;
   (defun desirepath-load-path-initial-value (&optional dir-list)
     "Add Emacs installation lisp directories to `load-path'.
-This is solely used for booting up desirepath.el package, so that
-`require' commands can be satisfied. Without the core packages available
-in `load-path' it is not possible to use Emacs.
+This is the bootstrap step called by `desirepath' when the load-path
+cache is missing or expired.  It ensures that `require' and `load'
+commands can find core Emacs lisp files (in particular `term/',
+`leim/' and other subdirectories that older Emacsen did not put on
+`load-path' by default) before the cache is rebuilt.
 
-The DIR-LIST is location of additional directories to consider as
-Emacs core-lisp installation directories."
+The bootstrap is idempotent: `cl-pushnew ... :test \\='string=' and
+`desirepath-load-path-add-subdirs' skip directories that are already
+on `load-path'.  It is safe to call multiple times.
+
+DIR-LIST, when non-nil, is an extra list of directories to treat as
+Emacs core-lisp installation roots (e.g. \\='/usr/share/emacs/31.1\\=').
+When nil, the root is inferred from `invocation-directory' or from
+the current `load-path' by `desirepath-emacs-root-directory'."
     (let* ((root-base (desirepath-emacs-root-directory))
 	   (dir-p     (and root-base
 			   (file-directory-p root-base)))
@@ -2926,10 +2934,6 @@ to change this.")
 is constantly written to disk. Prepare, everything will take oodles
 of time...")
 
-(defvar desirepath--external-data-structure nil
-  "Whole data structure from external tool. See `desirepath-external-setup'.
-Do not touch. This is highly important for debugging purposes.")
-
 (defvar desirepath--extra-manpath nil
   "Additional paths found. See `desirepath--extra-path-root'.")
 
@@ -2998,11 +3002,6 @@ Use function `desirepath-cache-mode' which modifies everything needed.")
     "^[*].*"
     0 'font-lock-comment-face t))
   "*Font lock keywords for the `desirepath--report-buffer' buffer.")
-
-(defvar desirepath--external-util-bin "emacs-util.pl"
-  "*External utility to help finding Emacs boot up information.
-DO NOR CHANGE THE NAME OF THE BINARY unless you rename the utility.
-See M-x desirepath-version (the manual) for more information.")
 
 ;;}}}
 ;;{{{ Macros
@@ -3566,17 +3565,6 @@ Return:
 	(erase-buffer))
     (desirepath-cache-regenerate)))
 
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-debug-external-helper ()
-  "Developer function. Test external helper program."
-  (interactive)
-  (desirepath-debug-wrapper-macro
-    (desirepath-external-helper-call
-     (current-buffer)
-     (desirepath-external-setup-1-main)
-     'debug)))
-
 ;;}}}
 ;;{{{ Misc
 
@@ -4047,47 +4035,6 @@ Return t if path is ok for current Emacs."
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-self-location-load-history ()
-  "Return `load-history' entry"
-  (let (file)
-    (cl-dolist (elt load-history)
-      (setq file (car elt))
-      (when (and (stringp file)
-		 (setq file (desirepath-expand-file-name file))
-		 (string-match "^\\(.+\\)[\\/]desirepath\\." file))
-	(cl-return (match-string 1 file))))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-self-location ()
-  "If package was loaded with absolute path, return path.
-Uses `load-history' and `load-path' information."
-  (let ((ret (desirepath-self-location-load-history)))
-    (unless ret ;; No luck with load-history, try load-path
-      (cl-dolist (path load-path)
-	(setq path (file-name-as-directory (expand-file-name path)))
-	(when (or (and (file-exists-p (concat path "desirepath.el"))
-		       path)
-		  (and (file-exists-p (concat path "desirepath.elc"))
-		       path)
-		  (and (file-exists-p (concat path "desirepath.el.gz"))
-		       path))
-	  (cl-return (setq ret path)))))
-    (unless ret
-      (message
-       (concat
-	"Desirepath: SELF NOTE desirepath.el was not loaded"
-	"\tusing absolute path."
-	"\t(load \"~/some/absolute/path/desirepath.el\")"))
-      (message "Desirepath: SELF %s" (or ret "<no load-history>" )))
-    ;;  desirepath-* function is XEmacs and Emacs compatible version
-    ;;  and ensures that forward slashes are used.
-    (and ret
-	 (setq ret (desirepath-expand-file-name ret)))
-    ret))
-
-;;; ----------------------------------------------------------------------
-;;;
 (defun desirepath-autoload-file-name (function)
   "Load package if FUNCTION is in autoload state."
   (let ((str (prin1-to-string (symbol-function function))))
@@ -4150,385 +4097,6 @@ NOERR NOMSG are parameters to `load'."
       (setq desirepath--load-path-ignore-regexp
 	    (concat desirepath--load-path-ignore-regexp
 		    "\\|" path))))))
-
-;;}}}
-;;{{{ External: emacs-util.pl
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-1-cache ()
-  "Parse files in format `desirepath--cache'."
-  (let ((i 0)
-	(personal-count 0) ;; User files 0 .. 2000
-	(other-count 2000)
-	(emacs-count 5000)
-	(font-lock-mode nil)
-	(lazy-lock-mode nil)
-	(regexp (concat "^LISP-FILE[ \t]+"
-			"\\("
-			"\\([^ \t\r\n]+[\\/]\\)"
-			"\\([^ \t\r\n]+\\)"
-			"\\)"))
-	path
-	dir
-	file
-	emacs
-	other
-	personal
-	elt)
-    (goto-char (point-min))
-    (while (re-search-forward regexp nil t)
-      (setq path (match-string 1)
-	    dir  (match-string 2)
-	    file (match-string 3))
-      ;; was: (desirepath-path-ok-p dir) , but now perl does
-      ;; the checking
-      (when t
-	;; (set-text-properties 0 (length dir) nil dir)
-	;; (set-text-properties 0 (length file) nil file)
-	(cl-incf i)
-	(when (zerop (% i 10))
-	  (desirepath-verbose-macro 2
-	    (message "Desirepath: EXT Caching files... %d %s" i path)))
-	;; data structure is ("file.el" (1 . "/home/foo/elisp/"))
-	;;
-	;;  The reason why we put paths to separate lists is that
-	;;  OTHER directories must override the Core Emacs paths,
-	;;  so that newest files are found. Usually you can download
-	;;  newer versions than what Emacs has.
-	(cond
-	 ((desirepath-load-path-emacs-distribution-p path)
-	  (cl-incf emacs-count)
-	  (setq elt (list file (cons emacs-count dir)))
-	  (push elt emacs))
-	 ((desirepath-load-path-personal-p path)
-	  (cl-incf personal-count)
-	  (setq elt (list file (cons personal-count dir)))
-	  (push elt personal))
-	 (t
-	  (cl-incf other-count)
-	  (setq elt (list file (cons other-count dir)))
-	  (push elt other)))))
-    (append (nreverse personal) (append other emacs))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-1 (id)
-  "Parse ID from current buffer. See `desirepath-external-helper'."
-  (let ((case-fold-search t)
-	(regexp (concat "^" id "[ \t]+\\([^ \t\r\n]+\\)"))
-	string
-	list)
-    (goto-char (point-min))
-    (while (re-search-forward regexp nil t)
-      (setq string (match-string 1))
-      ;; (set-text-properties 0 (length string) nil string)
-      (push string list))
-    (unless list
-      (desirepath-verbose-macro 1
-	(message  "Desirepath: EXT PARSE FATAL (id %s)\n" id)))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-main ()
-  "Parse current buffer. See'`desirepath-external-helper'."
-  (let (list
-	data
-	name)
-    ;;  Speedier processing
-    (buffer-disable-undo)
-    ;;  Clear text properties so that the data structures are clean
-    ;;  and possibly faster to use
-    (set-text-properties (point-min) (point-max) nil)
-    (desirepath-verbose-macro 5
-      (message  "Desirepath: EXT OUTPUT \n%s\n" (buffer-string)))
-    ;;  This list of symbols is same as the prefix string from
-    ;;  the perl script:
-    ;;
-    ;;  LISP-FILE filename-here
-    ;;  LISP-DIR filename-here
-    ;;  ...
-    (dolist (id '(info
-		  bin
-		  man
-		  lisp-dir
-		  c-src-dir))
-      (setq name (symbol-name id)
-	    data  (desirepath-external-output-parse-1 name))
-      (if (null data)
-	  (desirepath-verbose-macro 3
-	    (message "Desirepath: EXT PARSE ERROR [%s]" name))
-	(push (cons id data) list)))
-    ;;  'cache (lisp-files) handling is different. Do it now
-    (let ((data (desirepath-external-output-parse-1-cache)))
-      (if data
-	  (push (cons 'cache data) list)))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-bin-location (file)
-  "Return location of BINARY. Look from the installation dir.
-Look up `exec-path' and the kit installation directory. See
-Manual \\[desirepath-version] for more."
-  (let* ((path  (desirepath-executable-find file))
-	 (ret   path)
-	 self)
-    (when (and (null path)
-	       (setq self (desirepath-self-location)))
-      ;;  PATH/to/.../lisp/tiny/<desirepath.el>
-      ;;            |
-      ;;            |
-      ;;            /bin/emacs-util.pl
-      (setq self (desirepath-expand-file-name self))
-      (setq self
-	    (concat
-	     (file-name-as-directory self)
-	     ;;  PATH/to/lisp/files/<desirepath.el>
-	     "../../bin/"
-	     file))
-      (if (file-exists-p self)
-	  (setq ret self)))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT bin location %s" ret))
-    (when (and ret
-	       (not (file-exists-p ret)))
-      (message "Desirepath: EXT FATAL, bin location is wrong %s" ret)
-      (setq ret nil))
-    ret))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-helper-call (buffer path-list &optional debug)
-  "Use external helper Perl script if available.
-First, Environment must contain perl executable and second
-`desirepath--external-util-bin' must be along path.
-
-Input:
-
-  BUFFER     Where to output.
-  PATH-LIST  list of root directories to search.
-  DEBUG      Request debug.
-
-Return:
-
-  t          If external utility was found and called."
-  (let* ((file  desirepath--external-util-bin)
-	 (perl  (desirepath-executable-find-binary "perl"))
-	 (bin   (desirepath-external-bin-location
-		 desirepath--external-util-bin))
-	 (opt   (or path-list
-		    (error "Desirepath: path-list is empty.")))
-	 (ignore desirepath--load-path-ignore-regexp))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT perl location %s" (or perl "<not found>")))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT exec-path %s %s" file (or bin "<not found>")))
-    (when debug
-      (push "3" opt)
-      (push "--debug" opt))
-    (when (and desirepath--win32-p
-	       (not desirepath--win32-cygwin-p))
-      (push "no-symlinks" opt)
-      (push "--scan-type" opt))
-    (setq ignore
-	  (concat
-	   (or ignore "")
-	   (if (stringp ignore)
-	       "\\|" "")
-	   (if desirepath--xemacs-p
-	       "[/\\]emacs"
-	     "[/\\]xemacs")))
-    (dolist (switch (list
-		     "--Info"
-		     "--Man"
-		     "--Bin"
-		     "--Lang-lisp-file"
-		     "--Lang-lisp-dir"
-		     "--Lang-c-src-dir"
-		     ignore
-		     "--ignore-emacs-regexp"))
-      ;;  These will go to the beginning, which is ok.
-      (push switch opt))
-    (push bin opt)
-    (when debug
-      ;;  If Emacs hangs, at least we know how the external command was called.
-      (find-file "~/emacs-debug-desirepath.log")
-      (erase-buffer)
-      (insert (pp opt))
-      (save-buffer))
-    (if (null (and perl bin))
-	(desirepath-verbose-macro 5
-	  "Desirepath: EXT ERROR Can't call external utility")
-      (message "Desirepath: EXT Process running... [please wait] %s"
-	       (mapconcat 'identity opt " "))
-      (with-current-buffer buffer
-	(apply 'call-process
-	       perl
-	       nil
-	       (current-buffer)
-	       nil
-	       opt)
-	(desirepath-verbose-macro 9
-	  (message
-	   (concat "\nDesirepath: EXT OUTPUT END\n")))
-	(message "Desirepath: EXT done %s" bin)
-	t))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-helper-main (path-list)
-  "Call external helper with PATH-LIST and parse output.
-
-Return:
-
-  '((info . (path path ..))
-    (man  . (path path ..))
-    (bin  . (path path ..))
-    (lisp . (path path ..))
-    (cache . <FORMAT EQUALS TO DESIREPATH--CACHE>))."
-  (desirepath-with-temp-buffer
-    (when (desirepath-external-helper-call (current-buffer) path-list)
-      (desirepath-external-output-parse-main))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-1-main ()
-  "Return paths to pass to external program."
-  (let (list)
-    (dolist (elt (list
-		  ;; load-path must not be there, because it may be already
-		  ;; populated from the cache file: the one that we are
-		  ;; trying to build from fresh.
-		  ;;
-		  ;; -> do not add `load-path' to returned list
-		  ;;
-		  ;; But we can add the original load path which were
-		  ;; saved at startup.
-		  desirepath--extra-path-root
-		  desirepath--original-load-path
-		  desirepath--load-path-root
-		  (desirepath-Info-default-directory-list)))
-      (dolist (path elt)
-	(when (and (stringp path)
-		   (not (string-match "^[ \t]+$" path))
-		   (file-directory-p path))
-	  (push (desirepath-expand-file-name path) list))))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-cache (data)
-  "Set `desirepath--cache from DATA '((cache (DATA) ..)."
-  (let ((list (assq 'cache data)))
-    (when list
-      (setq list (cdr list))
-      (setq desirepath--cache list))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defsubst desirepath-external-setup-1-load-path (path regexp)
-  "Add PATH to `load-path'. Use REGEXP to check validity."
-  ;; The perl program recursed ALL directories, but we only
-  ;; want to find out lisp dirs that USER requested in
-  ;; `load-path' and `desirepath--load-path-root'
-  ;;
-  ;; lisp-roots is a lookup string "PATH\\|PATH\\|PATH .."
-  ;; which we can use to check if path is accepted
-  ;;
-  (cond
-   ((not (string-match regexp path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: PATH-NOK not candidate %s" path)))
-   ((desirepath-path-ok-p path)
-    (cl-pushnew path load-path :test 'string=))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defsubst desirepath-external-setup-1-man-path (path)
-  "Add PATH to `desirepath--extra-manpath'."
-  (when (or (not (stringp
-		  desirepath--manpath-ignore-regexp))
-	    (not (string-match
-		  desirepath--manpath-ignore-regexp
-		  path)))
-    (cl-pushnew path desirepath--extra-manpath :test 'string=)))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-load-path-lookup-regexp ()
-  "Return candidate `load-path' lookup regexp.
-This is combination of `load-path' and `desirepath--load-path-root'."
-  (let ((lisp-roots (append load-path
-			    desirepath--load-path-root)))
-    ;; Make lookup regexp
-    (mapconcat
-     (function
-      (lambda (x)
-	(regexp-quote
-	 (desirepath-expand-file-name x))))
-     lisp-roots
-     "\\|")))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-parse-data (data)
-  "Parse external tool's DATA structure."
-  (let ((lisp-lookup (desirepath-external-load-path-lookup-regexp))
-	correct-emacs
-	type)
-    (when data
-      (dolist (elt data)
-	(setq type (car elt))
-	(cl-dolist (path (cdr elt))
-	  ;; 'cache element is not a string.
-	  (when (stringp path)
-	    (setq correct-emacs
-		  (desirepath-path-ok-this-emacs-p path)))
-	  (cond
-	   ((equal type 'cache)
-	    ;; Not handled in this loop
-	    (cl-return))
-	   ((and (equal type 'lisp-dir)
-		 correct-emacs)
-	    (desirepath-external-setup-1-load-path path lisp-lookup))
-	   ((equal type 'man)
-	    (desirepath-external-setup-1-man-path path))
-	   ((equal type 'c-src-dir)
-	    (cl-pushnew path
-			desirepath--extra-ff-search-directories
-			:test
-			'string=))
-	   ((and (equal type 'bin)
-		 correct-emacs)
-	    (desirepath-exec-path-append path))
-	   ((and (equal type 'info)
-		 correct-emacs)
-	    (desirepath-info-handler path)
-	    (cl-pushnew path
-			(desirepath-Info-default-directory-list)
-			:test
-			'string=)))))
-      (desirepath-external-setup-cache data)) ;; When
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT END desirepath-external-setup %s"
-	       (if data
-		   "[DATA OK]"
-		 "[DATA NOK]")))
-    data))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup ()
-  "Use external tool to help setup emacs.
-See `desirepath-external-helper-main'."
-  (and
-   (setq desirepath--external-data-structure
-	 (desirepath-external-helper-main
-	  (desirepath-external-setup-1-main)))
-   (desirepath-external-setup-parse-data
-    desirepath--external-data-structure)))
 
 ;;}}}
 ;;{{{ Cache
@@ -4979,9 +4547,11 @@ compiled and non-compiled files."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-cache-file-old-p (file)
-  "Return non-nil if FILE exists and is too old.
-References:
-  `desirepath--cache-expiry-days'."
+  "Return non-nil if FILE exists and is older than the expiry.
+Returns nil when FILE does not exist, when `desirepath--cache-expiry-days'
+is nil (cache never expires), or when the file is still fresh.
+Use `desirepath-cache-file-needs-bootstrap-p' to test the broader
+condition \"cache is absent or expired\"."
   (when (and (file-exists-p file)
 	     (integerp desirepath--cache-expiry-days))
     (let ((days (desirepath-days-old file)))
@@ -5950,6 +5520,22 @@ is not a string. `desirepath--load-path-root': %s "
 ;;;}}}
 ;;;{{{ Cache
 
+(defun desirepath-cache-file-needs-bootstrap-p ()
+  "Return non-nil if the `load-path' cache needs a bootstrap scan.
+Returns t when the cache file is missing, when `desirepath--cache-file-prefix'
+is nil, or when the cache file exists but is older than
+`desirepath--cache-expiry-days'.  In all these cases callers should
+invoke `desirepath-load-path-initial-value' so that core Emacs lisp
+directories are present in `load-path' before the cache is rebuilt.
+
+The old condition `(desirepath-cache-file-old-p file)' only fired for
+an *existing* but *stale* cache, so the very first run (no cache file
+at all) skipped the bootstrap entirely."
+  (let ((file (desirepath-cache-file-name)))
+    (or (null file)
+        (not (file-exists-p file))
+        (and (desirepath-cache-file-old-p file) t))))
+
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-load-path-directory-files (path-list)
@@ -5961,10 +5547,10 @@ is not a string. `desirepath--load-path-root': %s "
 		 (file-directory-p dir))
 	;;   make sure directory has a slash at the end
 	(setq dir (file-name-as-directory dir))
-	;;  TRAD means "traditional Emacs Lisp way", because
-	;;  there is new method EXT for "External tool" to do similar
-	;;  caching. In fact if you see these messages, something
-	;;  went wrong with the EXT method.
+	;;  Native Emacs Lisp scanner.  The external Perl helper
+	;;  (`emacs-util.pl') from older tiny-tools releases has been
+	;;  removed; the "TRAD" label is kept so existing logs remain
+	;;  greppable.
 	(desirepath-verbose-macro 1
 	  (message "Desirepath: TRAD Caching files... %d %s"
 		   (length list)
@@ -6001,33 +5587,32 @@ You should call `desirepath-cache-setup-scan' after this function."
   (desirepath-load-path-clean))
 
 ;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-cache-setup-scan (&optional traditional)
-  "Build the cache either by using external program or Emacs Lisp."
-  (let ((external (not traditional))
-	;;  While loading this package Cygwin XEmacs garbage collects like mad.
-	;;  Ease it up for a while. This is 30Meg
-	(gc-cons-threshold (* 1024 1024 30)))
-    (or (and external
-	     (desirepath-external-setup))
-	(progn
-	  (desirepath-verbose-macro 3
-	    (message
-	     (concat
-	      "Desirepath: "
-	      "TRAD lisp method used for scanning.")))
-	  (desirepath-maybe-warn-message-log-max)
-	  (desirepath-info-scan-Info-default-directory-list)
-	  (funcall desirepath--load-path-function)
-	  (setq desirepath--cache (desirepath-load-path-directory-files
-				   load-path))))
+
+(defun desirepath-cache-setup-scan (&optional _traditional)
+  "Build the cache using the Emacs Lisp scanner.
+TRADITIONAL is accepted for backwards compatibility and ignored: the
+Perl helper (`emacs-util.pl') used by older tiny-tools releases is no
+longer used.  The native scanner is fast enough on modern machines
+(thousands of files per second).
+
+Always returns nil; the side effects are the updated `desirepath--cache'
+and `load-path'."
+  (let ((gc-cons-threshold (* 1024 1024 30)))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: TRAD lisp method used for scanning."))
+    (desirepath-maybe-warn-message-log-max)
+    (desirepath-info-scan-Info-default-directory-list)
+    (funcall desirepath--load-path-function)
+    (setq desirepath--cache
+          (desirepath-load-path-directory-files load-path))
     ;;  many push and pushnew were called.
     (when (fboundp 'garbage-collect)
       (message "Desirepath: cache-setup-scan requested `garbage-collect'")
-      (garbage-collect))))
+      (garbage-collect))
+    nil))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-cache-status-string ()
   "Return cache statistics."
   (format "Desirepath: packages %d, load-path %d, exec-path %d, info %d"
@@ -6054,7 +5639,13 @@ rescan directories if cache file is older than
 Input:
 
   FORCE       Rescan and save cache.
-  TRADITIONAL Use traditional Emacs lisp cache scan."
+  TRADITIONAL Use traditional Emacs lisp cache scan.
+Return:
+
+  nil   Always.  Side effects: `load-path', `exec-path',
+        `Info-directory-list', and `desirepath--cache' are updated; if
+        FORCE is non-nil or the cache was rebuilt, the cache file is
+        saved to disk."
   (interactive "P")
   (let* ((file       (desirepath-cache-file-name))
 	 (read-cache (and (null force)
@@ -6140,7 +5731,8 @@ Input:
     (desirepath-cache-status-message)
     ;; Make sure that this list is cleared. It must be
     ;; regenerated as well.
-    (desirepath-emacs-lisp-file-list-cache-clear)))
+    (desirepath-emacs-lisp-file-list-cache-clear)
+    nil))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -7212,16 +6804,11 @@ The original value is saved under property `desirepath-saved-value'."
   ;;  it will make loading custom.elc possible. Without it, the
   ;;  defcustomed variables give errors
   (when desirepath--install-flag
-    (when (and (not (desirepath-byte-compile-running-p))
-	       ;;(and (desirepath-byte-compile-running-p)
-	       ;;     (boundp 'xemacs-logo))
-	       ;;
-	       ;; If there is cache and it is valid, do not run
-	       ;; BOOT.
-	       (let ((file (desirepath-cache-file-name)))
-		 (desirepath-cache-file-old-p file)))
-      (desirepath-load-path-initial-value
-       desirepath--core-emacs-load-path-list))))
+    (unless (desirepath-byte-compile-running-p)
+      (when (desirepath-cache-file-needs-bootstrap-p)
+        (message "Desirepath: BOOT cache missing or expired; scanning Emacs install tree.")
+        (desirepath-load-path-initial-value
+         desirepath--core-emacs-load-path-list)))))
 
 
 ;;}}}
