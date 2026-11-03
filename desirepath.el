@@ -5112,6 +5112,20 @@ Optionally INSERT."
   "*This variable includes a basic `dir' file for Emacs info.
 Do not change.")
 
+(defcustom desirepath--info-manage-dir-file nil
+  "Whether `desirepath' may create or update `dir' files.
+When nil (the default), `desirepath' never writes `dir' files.
+This avoids conflicts with `install-info' and package managers, which
+own `dir' files in system-wide info directories such as
+\"/usr/share/info\" and update them via `update-info-dir'.
+
+When t, `desirepath' creates a `dir' file in any directory that
+contains `.info' files but no `dir', and populates it with basic
+directory entries.  Enable this only for local (non-system) info
+directories that you manage manually."
+  :type 'boolean
+  :group 'Desirepath)
+
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-info-display (&optional insert)
@@ -5225,6 +5239,8 @@ Returned list in the above case is '(\"Tar\" \"Fileutils\")."
 Give the absolute path to the `dir' and the directory is scanned
 for new entries which are updated to file `dir'.
 
+Does nothing unless `desirepath--info-manage-dir-file' is non-nil.
+
 Input:
 
   FILE         The `dir' file location
@@ -5238,147 +5254,80 @@ Return:
 
   ;;  (interactive "FInfo file named `dir', location: ")
 
-  (when (file-directory-p file)
-    (error "You must give a filename"))
-  (let ((buffer (find-file-noselect file))
-	done
-	buffer-file)
-    (with-current-buffer buffer
-      ;;  If we read /usr/local/info and we're not root, then
-      ;;  this buffer will be read only. Make it writable. The
-      ;;  save error is handled elsewhere.
-      ;;
-      (setq buffer-read-only nil)
-      (desirepath-verbose-macro 1
-	(message "Desirepath: [INFO] found %s" file))
-      (let ((entries (or info-files
-			 (desirepath-info-files-in-directory
-			  (file-name-directory file)))))
-	(dolist (entry entries)
-	  (unless (desirepath-info-directory-entry-p entry)
-	    (goto-char (point-max))
-	    (unless (looking-at "^[\n\t ]*$")
-	      (insert "\n"))
-	    (insert (format "* %s: (%s).\n" entry entry))
-	    (desirepath-verbose-macro 2
-	      (message "Desirepath: [INFO] added entry `%s' to file %s"
-		       entry file))
-	    (setq done t)
-	    (set-buffer-modified-p nil) ;; do not ask user  when killing buffer
-	    (setq buffer-file (buffer-file-name))))) ;; let*
-      (if (called-interactively-p 'interactive)
-	  (when done
-	    (message "Desirepath: [INFO] Edit and verify changes at %s" file))
-	(when (and done buffer-file)
-	  (desirepath-write-region (point-min) (point-max) buffer-file))
-	(when (buffer-live-p buffer)
-	  (kill-buffer buffer)))) ;; With-current
-    done))
+  (when desirepath--info-manage-dir-file
+    (when (file-directory-p file)
+      (error "You must give a filename"))
+    (let ((buffer (find-file-noselect file))
+          done
+          buffer-file)
+      (with-current-buffer buffer
+        ;;  If we read /usr/local/info and we're not root, then
+        ;;  this buffer will be read only. Make it writable. The
+        ;;  save error is handled elsewhere.
+        ;;
+        (setq buffer-read-only nil)
+        (desirepath-verbose-macro 1
+          (message "Desirepath: [INFO] found %s" file))
+        (let ((entries (or info-files
+                           (desirepath-info-files-in-directory
+                            (file-name-directory file)))))
+          (dolist (entry entries)
+            (unless (desirepath-info-directory-entry-p entry)
+              (goto-char (point-max))
+              (unless (looking-at "^[\n\t ]*$")
+                (insert "\n"))
+              (insert (format "* %s: (%s).\n" entry entry))
+              (desirepath-verbose-macro 2
+                (message "Desirepath: [INFO] added entry `%s' to file %s"
+                         entry file))
+              (setq done t)
+              (set-buffer-modified-p nil)
+              (setq buffer-file (buffer-file-name)))))
+        (if (called-interactively-p 'interactive)
+            (when done
+              (message "Desirepath: [INFO] Edit and verify changes at %s" file))
+          (when (and done buffer-file)
+            (desirepath-write-region (point-min) (point-max) buffer-file))
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer))))
+      done)))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-file-DIR (path)
   "Make `dir' file name using PATH."
   (concat (file-name-as-directory path) "dir"))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-handler-DIR (dir)
-  "Handle creating/updating central info file DIR `dir' to current directory."
-  (let ((dir-file (desirepath-info-file-DIR dir)))
-    (unless (file-exists-p dir-file)  ;No central dir, generate one...
-      (desirepath-verbose-macro 3
-	(message "Desirepath: [INFO] missing central `dir' generating %s"
-		 dir-file))
-      (desirepath-with-temp-buffer
-	(insert desirepath--info-file-basic-contents)
-	(insert " "
-		(desirepath-expand-file-name dir)
-		"\n")
-	;;  maybe we don't have permission to write to this directory?
-	(desirepath-write-region (point-min) (point-max) dir-file)
-	t))))
+  "Handle creating/updating central info file DIR `dir' to current directory.
+Does nothing unless `desirepath--info-manage-dir-file' is non-nil.
+The default nil avoids conflicting with `install-info' and package
+managers, which own `dir' files in system-wide info directories."
+  (when desirepath--info-manage-dir-file
+    (let ((dir-file (desirepath-info-file-DIR dir)))
+      (unless (file-exists-p dir-file)  ;No central dir, generate one...
+        (desirepath-verbose-macro 3
+          (message "Desirepath: [INFO] missing central `dir' generating %s"
+                   dir-file))
+        (desirepath-with-temp-buffer
+          (insert desirepath--info-file-basic-contents)
+          (insert " " (desirepath-expand-file-name dir) "\n")
+          ;;  maybe we don't have permission to write to this directory?
+          (desirepath-write-region (point-min) (point-max) dir-file)
+          t)))))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-handler (dir)
   "Check if DIR contains info files and a special `dir' file.
-This function will create `dir' file if it does not exist,
-update `Info-default-directory-list' and add any new INFO entries in
-DIR to central `dir' file in that directory.
-
-Please suggest to the lisp package maintainer that he
-should ship with default `dir' in next release so that it
-could be automatically used.
-
-Return
-
-  t   if any changes made."
-  (interactive "fGive directory with info files: ")
-  ;;  If user calls us, make sure new files are also noticed.
-  ;;
-  (if (called-interactively-p 'interactive)
-      (desirepath-info-initialize))
-  (let ((list     (desirepath-info-files-in-directory dir))
-	(dir-file (concat (file-name-as-directory dir) "dir"))
-	cleanup
-	done)
-    (when (and (null list)
-	       (called-interactively-p 'interactive))
-      (message "Desirepath: No info file candidates in %s" dir))
-    (when list                          ;info files in this directory?
-      (setq done (desirepath-info-handler-DIR dir))
-					;  (desirepath-info-directory-contents-update
-					;   dir-file
-					;   (called-interactively-p 'interactive)
-					;   (called-interactively-p 'interactive)
-					;   list)
-      (desirepath-verbose-macro 2
-	(message "Desirepath: [INFO] PUSH maybe => %s"
-		 dir))
-      (desirepath-verbose-macro 5
-	(message
-	 "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
-	 (prin1-to-string (desirepath-Info-default-directory-list))))
-      ;;  Always add found directories to the list.
-      ;;  Notice, that directory may contain trailing slash, that's why
-      ;;  two `member' tests
-      ;;
-      ;;   ../info
-      ;;   ../info/
-      ;;
-      (let* ((dir1 (file-name-as-directory dir))         ;; with slash
-	     (dir2 (substring dir 0 (1- (length dir1)))) ;; without
-	     (list (desirepath-Info-default-directory-list)))
-	(unless (or (member dir1 list)
-		    (member dir2 list))
-	  (desirepath-verbose-macro 2
-	    (message
-	     "Desirepath: [INFO] PUSH Info-default-directory-list => %s" dir2))
-	  (setq cleanup t)
-	  ;;  This is efectively "(push dir2 <info-list>)"
-	  (set (desirepath-Info-default-directory-list-sym)
-	       (cons dir2 (desirepath-Info-default-directory-list)))
-	  (desirepath-verbose-macro 5
-	    (message
-	     "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list))))))
-      ;;  Kill all previous info files from Emacs, so that next info
-      ;;  C-h i will force Emacs to regenerate found new entries.
-      (when (or cleanup                 ;Added new directory
-		(called-interactively-p 'interactive))
-	(desirepath-info-initialize)))
-    done))
-
-(defun desirepath-info-handler- (dir)
-  "Check if DIR contains info files and a special `dir' file.
-This function will create `dir' file if it does not exist,
-update `Info-default-directory-list' and add any new INFO entries in
-DIR to central `dir' file in that directory.
-
-Please suggest to the lisp package maintainer that he
-should ship with default `dir' in next release so that it
-could be automatically used.
+If `desirepath--info-manage-dir-file' is non-nil and DIR has `.info'
+files but no `dir', a minimal `dir' is created.  If DIR has a `dir'
+file, DIR is added to `Info-directory-list' (unless it is already
+there).  If DIR has `.info' files but no `dir' and dir creation is
+disabled, DIR is silently skipped: without a `dir' file Info cannot
+index its contents anyway.
 
 Return
 
@@ -5396,51 +5345,43 @@ Return
 	       (called-interactively-p 'interactive))
       (message "Desirepath: No info file candidates in %s" dir))
     (when list                          ;info files in this directory?
+      ;; Optionally create `dir' (only if `desirepath--info-manage-dir-file').
       (setq done (desirepath-info-handler-DIR dir))
-      (desirepath-info-directory-contents-update
-       dir-file
-       (called-interactively-p 'interactive)
-       (called-interactively-p 'interactive)
-       list)
-      (desirepath-verbose-macro 2
-	(message "Desirepath: [INFO] PUSH maybe => %s"
-		 dir))
-      (desirepath-verbose-macro 5
-	(message
-	 "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
-	 (prin1-to-string (desirepath-Info-default-directory-list))))
-      ;;  Always add found directories to the list.
-      ;;  Notice, that directory may contain trailing slash, that's why
-      ;;  two `member' tests
-      ;;
-      ;;   ../info
-      ;;   ../info/
-      ;;
-      (let* ((dir1 (file-name-as-directory dir))         ;; with slash
-	     (dir2 (substring dir 0 (1- (length dir1)))) ;; without
-	     (list (desirepath-Info-default-directory-list)))
-	(unless (or (member dir1 list)
-		    (member dir2 list))
-	  (desirepath-verbose-macro 2
-	    (message
-	     "Desirepath: [INFO] PUSH Info-default-directory-list => %s" dir2))
-	  (setq cleanup t)
-	  ;;  This is efectively "(push dir2 <info-list>)"
-	  (set (desirepath-Info-default-directory-list-sym)
-	       (cons dir2 (desirepath-Info-default-directory-list)))
-	  (desirepath-verbose-macro 5
-	    (message
-	     "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list))))))
-      ;;  Kill all previous info files from Emacs, so that next info
-      ;;  C-h i will force Emacs to regenerate found new entries.
-      (when (or cleanup                 ;Added new directory
-		(called-interactively-p 'interactive))
-	(desirepath-info-initialize)))
+      ;; Info can only index a directory if it contains a `dir' file.
+      ;; Adding a directory without one to `Info-directory-list' would
+      ;; only pollute the list with useless entries.
+      (when (file-exists-p dir-file)
+        (desirepath-verbose-macro 2
+          (message "Desirepath: [INFO] PUSH maybe => %s" dir))
+        (desirepath-verbose-macro 5
+          (message
+           "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
+           (prin1-to-string (desirepath-Info-default-directory-list))))
+        (let* ((dir1 (file-name-as-directory dir))         ;; with slash
+               (dir2 (substring dir 0 (1- (length dir1)))) ;; without
+               (list (desirepath-Info-default-directory-list)))
+          (unless (or (member dir1 list)
+                      (member dir2 list))
+            (desirepath-verbose-macro 2
+              (message
+               "Desirepath: [INFO] PUSH Info-default-directory-list => %s"
+               dir2))
+            (setq cleanup t)
+            (set (desirepath-Info-default-directory-list-sym)
+                 (cons dir2 (desirepath-Info-default-directory-list)))
+            (desirepath-verbose-macro 5
+              (message
+               "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
+               (prin1-to-string (desirepath-Info-default-directory-list))))))
+        ;;  Kill all previous info files from Emacs, so that next info
+        ;;  C-h i will force Emacs to regenerate found new entries.
+        (when (or cleanup                 ;Added new directory
+                  (called-interactively-p 'interactive))
+          (desirepath-info-initialize))))
     done))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-kill-buffers ()
   "Kill all *info* buffers."
   ;;  - There may be hidden buffers that Emacs uses to gather
