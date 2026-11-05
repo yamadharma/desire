@@ -1364,11 +1364,10 @@ Set to non-nil for initial uses of this package first
 to see messages that may need attention. The messages can be recalled
 from the *Messages* buffer.")
 
-  ;;  This is just forward declaration for byte compiler
-  ;;  It it not sensible to lift `defcustom' definition apart from
-  ;;  to the beginning of file due to macros and all which refer to it.
-  ;;  => This is a user variable and defcustom should stay in user section.
-  (defvar desirepath--verbose 3
+  ;;  This is just forward declaration for byte compiler.
+  ;;  Default 1: только ключевые сообщения (BEGIN/END, status).  Set to
+  ;;  2/3/5 for more; 20 for "everything, logged to file".
+  (defvar desirepath--verbose 1
     "*Verbosity level"))
 
 ;;;; `Info-directory-list' is declared (bound to nil) so that
@@ -1411,17 +1410,19 @@ from the *Messages* buffer.")
   "The value is non-nil if running under Win32 Cygwin Emacs.")
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-tmp-message (msg)
-  "Print messages to user."
+  "Print messages to user.
+The message is always appended to `*Messages*'; the dedicated
+`*desirepath.el ERROR*' buffer is only popped up when
+`desirepath--startup-no-messages' is nil."
   (let ((buffer (get-buffer-create "*desirepath.el ERROR*")))
     (with-current-buffer buffer
-      (goto-char (point-min))
-      (insert msg) ;; Insert message first
-      ;; Make a record to *Messages* buffer as well.
-      (message msg)
-      (unless desirepath--startup-no-messages
-	(pop-to-buffer buffer)))))
+      (goto-char (point-max))
+      (insert msg))
+    (message "%s" msg)
+    (unless desirepath--startup-no-messages
+      (pop-to-buffer buffer))))
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy from tinyliba.el
@@ -1594,25 +1595,31 @@ from the *Messages* buffer.")
 		      (prin1-to-string command-line-args))))
 
 ;;; ----------------------------------------------------------------------
-;;; Only some values are recorded as messages to the *Messages* buffer
-;;; Showing the values possibly makes user think if he needs
-;;; to change the defaults.
-;;;
+;;;; Only some values are recorded as messages to the *Messages* buffer
+;;;; Showing the values possibly makes user think if he needs
+;;;; to change the defaults.
+
   (put 'desirepath-set-default-value-macro 'lisp-indent-function 1)
   (put 'desirepath-set-default-value-macro 'edebug-form-spec '(body))
   (defmacro desirepath-set-default-value-macro (var &rest body)
-    "Print verbose messages when activating VAR and run BODY."
+    "Print verbose messages when activating VAR and run BODY.
+Messages are emitted only when `desirepath--verbose' is greater than 3;
+the default value is 1, so the default run is silent.  The macro is
+used in `defcustom' forms; the value is visible via `M-x
+describe-variable' anyway."
     `(let (val)
        ;;  This may call several functions.
        (setq val ,@body)
-       (unless (desirepath-byte-compile-running-p)
+       (when (and (not (desirepath-byte-compile-running-p))
+                  (integerp desirepath--verbose)
+                  (> desirepath--verbose 3))
 	 (message "Desirepath: Default value for `%s' ... %s"
 		  ,var
 		  (prin1-to-string val)))
        val))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
   (put 'desirepath-verbose-macro 'lisp-indent-function 1)
   (defmacro desirepath-verbose-macro (level &rest body)
     "When LEVEL is =< `desirepath--verbose' run BODY."
@@ -2234,7 +2241,7 @@ the current `load-path' by `desirepath-emacs-root-directory'."
 	(message "Desirepath: load-path auto-boot... done"))))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
   (defun desirepath-tmp-find-root-home ()
     "Return suitable root user HOME directory. /home/root etc."
     (let (ret)
@@ -2248,7 +2255,8 @@ the current `load-path' by `desirepath-emacs-root-directory'."
 			"/"))
 	(when (and (stringp path)
 		   (file-directory-p path))
-	  (message "Desirepath: desirepath-tmp-find-root-home [%s]" path)
+	  (desirepath-verbose-macro 5
+	    (message "Desirepath: desirepath-tmp-find-root-home [%s]" path))
 	  (setq ret path)
 	  (cl-return)))
       ret))
@@ -2281,7 +2289,8 @@ References:
 	  ret)
       (when (and (not (file-directory-p "~/tmp"))
 		 (not (file-directory-p "c:/"))) ;; Non-Win32 system
-	(message "Desirepath: [WARNING] Cannot find $HOME/tmp directory."))
+	(desirepath-verbose-macro 3
+	  (message "Desirepath: [INFO] $HOME/tmp not found (using fallback)")))
       (cl-dolist (dir '("~/.emacs.d/config/"
 			"~/elisp/config/"
 			"~/elisp/conf/"
@@ -2482,7 +2491,7 @@ If set to nil; do not use cache feature, but scan directories at startup."
 (defcustom desirepath--verbose
   (desirepath-set-default-value-macro
       "desirepath--verbose"
-    3)
+    1)
   "*If number, bigger than zero, let user know what's happening.
 In error situations you can look old messages from *Messages* buffer.
 If you want all messages, set value to 10.
@@ -2556,8 +2565,9 @@ fixed and added to `Info-default-directory-list'."
     :type '(list directory)
     :group 'Desirepath)) ;; eval-and-compile end
 
-(message "Desirepath: [VAR] desirepath--Info-default-directory-list %s"
-	 (prin1-to-string desirepath--Info-default-directory-list))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--Info-default-directory-list %s"
+	   (prin1-to-string desirepath--Info-default-directory-list)))
 
 ;;  We can't use `ti::package-config-file-prefix' NOW, because the tinylibm.el
 ;;  is not yet loaded - `load-path' is not yet know for sure.
@@ -2591,8 +2601,9 @@ References:
   :type  '(list  string)
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--compressed-file-extensions %s"
-	 (prin1-to-string desirepath--compressed-file-extensions))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--compressed-file-extensions %s"
+	   (prin1-to-string desirepath--compressed-file-extensions)))
 
 (defcustom desirepath--cache-file-prefix
   ;;
@@ -2611,8 +2622,9 @@ An example:  /home/some/elisp/config/tinypah-cache-"
   :type  'string
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-prefix %s"
-	 (prin1-to-string desirepath--cache-file-prefix))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-prefix %s"
+	   (prin1-to-string desirepath--cache-file-prefix)))
 
 (defcustom desirepath--cache-file-hostname-function
   'desirepath-cache-file-hostname
@@ -2635,8 +2647,9 @@ See manual \\[desirepath-version] for more information."
   :type  'function
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-hostname-function %s"
-	 (prin1-to-string desirepath--cache-file-hostname-function))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-hostname-function %s"
+	   (prin1-to-string desirepath--cache-file-hostname-function)))
 
 ;;  We select the compressed file to save space if we can detect gzip
 ;;  in this environment.
@@ -2661,8 +2674,9 @@ Do not st this to \".elc.gz\", it's not supported."
   :type  'string
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-postfix %s"
-	 (prin1-to-string desirepath--cache-file-postfix))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-postfix %s"
+	   (prin1-to-string desirepath--cache-file-postfix)))
 
 (defcustom desirepath--load-path-dump-file
   ;;
@@ -2681,10 +2695,11 @@ Called from function `desirepath-cache-duplicate-report'."
   :type  'function
   :group 'Desirepath)
 
-(message
- "Desirepath: [VAR] desirepath--cache-duplicate-report-ignore-functions %s"
- (prin1-to-string
-  desirepath--cache-duplicate-report-ignore-functions))
+(desirepath-verbose-macro 5
+  (message
+   "Desirepath: [VAR] desirepath--cache-duplicate-report-ignore-functions %s"
+   (prin1-to-string
+    desirepath--cache-duplicate-report-ignore-functions)))
 
 (defcustom desirepath--ignore-file-regexp nil
   "*Prohibit loading lisp file if regexp matches absolute path.
@@ -2826,8 +2841,9 @@ See Manual for explanation: M-x desirepath-version and \"Gnus\".")
 
 (run-hooks 'desirepath--load-path-ignore-regexp-hook)
 
-(message "Desirepath: [VAR] desirepath--ignore-file-regexp %s"
-	 (prin1-to-string desirepath--ignore-file-regexp))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--ignore-file-regexp %s"
+	   (prin1-to-string desirepath--ignore-file-regexp)))
 
 (eval-and-compile ;;  Needed at boot-time.
   (defcustom desirepath--core-emacs-load-path-list nil
@@ -2858,8 +2874,9 @@ XEmacs:
     :type  'directory
     :group 'Desirepath))
 
-(message "Desirepath: [VAR] desirepath--core-emacs-load-path-list %s"
-	 (prin1-to-string desirepath--core-emacs-load-path-list))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--core-emacs-load-path-list %s"
+	   (prin1-to-string desirepath--core-emacs-load-path-list)))
 
 (defcustom desirepath--load-path-root
   (desirepath-set-default-value-macro
@@ -2906,8 +2923,9 @@ for manual pages and info files."
   :type  '(list directory)
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--extra-path-root %s"
-	 (prin1-to-string desirepath--extra-path-root))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--extra-path-root %s"
+	   (prin1-to-string desirepath--extra-path-root)))
 
 ;;; ....................................................... &v-private ...
 
@@ -4496,7 +4514,7 @@ References:
 	       (functionp host-func))
       (let (ret)
 	(setq ret (funcall host-func))
-	(desirepath-verbose-macro 3
+	(desirepath-verbose-macro 5
 	  (message "Desirepath: CACHE file host function returned %s"
 		   (or ret "nil")))
 	(if (stringp ret)
@@ -5607,9 +5625,11 @@ and `load-path'."
           (desirepath-load-path-directory-files load-path))
     ;;  many push and pushnew were called.
     (when (fboundp 'garbage-collect)
-      (message "Desirepath: cache-setup-scan requested `garbage-collect'")
+      (desirepath-verbose-macro 5
+	(message "Desirepath: cache-setup-scan requested `garbage-collect'"))
       (garbage-collect))
     nil))
+
 
 ;;; ----------------------------------------------------------------------
 
@@ -6684,16 +6704,18 @@ old Emacs, or `info.el' loaded partially)."
     ;; Ensure `Info-directory-list' is initialized before any use of
     ;; `desirepath-Info-default-directory-list' or `Info-directory-list'.
     (desirepath--info-ensure-initialized)
-    (message "Desirepath: %s BEGIN %s" fid (desirepath-time-string))
-    (message "Desirepath: [INFO] (defmacro) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list)))
-    (message "Desirepath: [INFO] Info-directory-list: %s"
-	     (if (boundp 'Info-directory-list)
-		 (prin1-to-string Info-directory-list)
-	       "<empty>"))
-    (message "Desirepath: [INFO] INFOPATH environment variable: %s"
-	     (or (getenv "INFOPATH")
-		 "no variable"))
+    (desirepath-verbose-macro 1
+      (message "Desirepath: %s BEGIN %s" fid (desirepath-time-string)))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: [INFO] (defmacro) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list)))
+      (message "Desirepath: [INFO] Info-directory-list: %s"
+	       (if (boundp 'Info-directory-list)
+		   (prin1-to-string Info-directory-list)
+	         "<empty>"))
+      (message "Desirepath: [INFO] INFOPATH environment variable: %s"
+	       (or (getenv "INFOPATH")
+		   "no variable")))
     ;;  Must be before the cygwin check, where cygwin1.dll is
     ;;  searched along `exec-path'
     ;;
@@ -6756,13 +6778,15 @@ Desirepath: ** Hm, manual pages found, but you do not have woman.el
 	 desirepath--load-path-root)
     (desirepath-Info-default-directory-list-clean)
     (desirepath-exec-path-clean)
-    (message "Desirepath: [INFO] END (defmacro) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list)))
-    (message "Desirepath: [INFO] END Info-directory-list: %s"
-	     (if (boundp 'Info-directory-list)
-		 (prin1-to-string Info-directory-list)
-	       "<empty>"))
-    (message "Desirepath: %s END %s" fid (desirepath-time-string))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: [INFO] END (defmacro) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list)))
+      (message "Desirepath: [INFO] END Info-directory-list: %s"
+	       (if (boundp 'Info-directory-list)
+		   (prin1-to-string Info-directory-list)
+	         "<empty>")))
+    (desirepath-verbose-macro 1
+      (message "Desirepath: %s END %s" fid (desirepath-time-string)))
     (message (concat (desirepath-cache-status-string)
 		     (format " time %d sec" diff)))))
 
