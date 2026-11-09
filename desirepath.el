@@ -2432,13 +2432,13 @@ Which package loads?
 
 (defcustom desirepath--cache-enabled t
   "Whether `desirepath' uses its `load-path' cache at all.
-When nil, `desirepath' scans the filesystem on every startup
-instead of loading a cache from disk, and the advice on `load',
-`require', `locate-library', etc. is not installed.  Package loading
-is noticeably slower, but no stale cache can interfere.
+When nil, `desirepath' scans the filesystem on every startup instead
+of loading a cache from disk, and advice on `load', `require',
+`locate-library', etc. is not installed.  Startup is noticeably
+slower, but no stale cache can interfere.
 
 In a healthy setup leave this at the default t.  Set it to nil only
-when the cache has become corrupted or for debugging."
+when the cache has become corrupted, or for debugging."
   :type 'boolean
   :group 'Desirepath)
 
@@ -2446,35 +2446,50 @@ when the cache has become corrupted or for debugging."
   "*Type of compression support for `load'/`require'/`autoload'.
 
 nil
-    No compression.  Search only .el and .elc files.
-    Recommended when you keep no compressed Lisp files: no extra
-    suffixes are tried, so package lookup is noticeably faster.
-    `desirepath--compressed-file-extensions' is effectively ignored.
+    No compression.  Search only .el and .elc files.  Recommended if
+    you keep no compressed Lisp files: no extra suffixes are tried,
+    lookup is noticeably faster.  `desirepath--compressed-file-extensions'
+    is effectively ignored.
 
 `default'
     In addition to .el/.elc, files ending in .gz and .bz2 are
     considered when `load' or `require' is called.  `jka-compr' is
     loaded automatically on demand, so `(load \"my-file\")' transparently
     finds `my-file.el.gz' or `my-file.el.bz2' if present.  Compressed
-    files are also included in `desirepath--cache', so lookup is fast.
+    files are also included in `desirepath--cache'.
 
 `all'
     In addition to `default', autoloaded functions can be resolved
-    from compressed files.  This means `;;;###autoload' cookies in
-    .el.gz files work; recommended if you keep Lisp sources
-    compressed to save space.
+    from compressed files, so `;;;###autoload' cookies in .el.gz files
+    work.  Recommended if you keep Lisp sources compressed to save
+    space.
 
 This value must be set once, before `desirepath' is loaded.  Changing
-it afterwards has no effect.
+it afterwards has no effect on already-built caches; call
+`desirepath-cache-regenerate' to rebuild.
 
-To disable the cache entirely, see `desirepath--cache-enabled'.  The
-deprecated value `none' is accepted for backward compatibility and is
-translated to `desirepath--cache-enabled' = nil (see below)."
+The deprecated value `none' is accepted for backward compatibility
+and is translated to `desirepath--cache-enabled' = nil (see below).
+
+To disable the cache entirely, set `desirepath--cache-enabled' to nil."
   :type '(choice (const :tag "No compression" nil)
                  (const :tag "Compression for load/require" default)
                  (const :tag "Also autoload from compressed files" all)
                  (const :tag "Deprecated (use desirepath--cache-enabled)" none))
   :group 'Desirepath)
+
+;; Migration: `'none' used to mean \"do not use cache at all\".
+;; Translate it to the new dedicated flag and warn once.
+(when (eq desirepath--compression-support 'none)
+  (display-warning
+   'desirepath
+   "`desirepath--compression-support' = 'none is deprecated.
+It now means \"disable cache\"; set `desirepath--cache-enabled' = nil
+instead.  Auto-translating for this session."
+   :warning)
+  (setq desirepath--cache-enabled nil)
+  (setq desirepath--compression-support nil))
+
 
 ;; Migration: `'none' used to mean \"do not use cache at all\".
 ;; Translate it to the new dedicated flag and warn.
@@ -2498,9 +2513,16 @@ instead.  Auto-translating for this session."
   (desirepath-set-default-value-macro
       "desirepath--cache-expiry-days"
     14)
-  "*How many days until expiring `load-path' cache and rescan paths.
-If set to nil; do not use cache feature, but scan directories at startup."
-  :type 'integer
+  "*How many days until the `load-path' cache expires and is rebuilt.
+If nil, the cache is loaded on every startup and never expires
+automatically; call \\[desirepath-cache-regenerate] to force a refresh.
+If a positive integer, the cache is loaded as long as it is younger
+than that many days; older caches are rebuilt.
+
+To disable the cache entirely (never load, always scan), set
+`desirepath--cache-enabled' to nil instead."
+  :type '(choice (const :tag "Never expire" nil)
+                 (integer :tag "Days until expiry"))
   :group 'Desirepath)
 
 (defcustom desirepath--report-mode-name "DesirepathReport"
@@ -3798,13 +3820,12 @@ Please run \\[desirepath-cache-regenerate]"
     t))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-file-extension-compressed (&optional list)
   "Append compressed extensions to each element in LIST.
-Returns a list of (ELT + EXT) for each ELT in LIST and each EXT in
+Returns (ELT + EXT) for each ELT and each EXT in
 `desirepath--compressed-file-extensions'.  Returns nil when
-`desirepath--compression-support' is nil, i.e. when no compression
-support is requested."
+`desirepath--compression-support' is nil (no compression requested)."
   (when desirepath--compression-support
     (let (ret)
       (dolist (elt (or list '("")))
@@ -4060,10 +4081,13 @@ count as Lisp files; otherwise only .el and .elc do."
         (message "Desirepath: [error] directory not found %s" path))
       nil)
      (t
-      (cl-dolist (elt (directory-files path))
-        (when (string-match regexp elt)
-          (cl-return t)))
-      nil))))
+      (let ((regexp (if desirepath--compression-support
+			"\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                      "\\.elc?$")))
+	(cl-dolist (elt (directory-files path))
+          (when (string-match regexp elt)
+            (cl-return t)))
+	nil)))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -5582,12 +5606,16 @@ set of files that `locate-library' and `require' can actually find."
         (desirepath-verbose-macro 1
           (message "Desirepath: TRAD Caching files... %d %s"
                    (length list) dir))
-        (dolist (file (directory-files dir nil regexp))
-          (unless (file-directory-p (concat dir file))
-            (cl-incf count)
+	(dolist (file (directory-files
+		       dir nil
+		       (if desirepath--compression-support
+                           "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                         "\\.elc?$")))
+	  (unless (file-directory-p (concat dir file))
+	    (cl-incf count)
             (desirepath-verbose-macro 9
-              (message "Desirepath: TRAD Cached %s"
-                       (concat dir file)))
+	      (message "Desirepath: TRAD Cached %s"
+		       (concat dir file)))
             (push (list file (cons count
                                    (desirepath-expand-file-name dir)))
                   list)))))
@@ -6182,17 +6210,17 @@ Warning:
   (desirepath-cache-mode -1))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun turn-on-desirepath-cache-mode-maybe ()
-  "See `desirepath-cache-mode'.
-Turn mode on only if `desirepath--cache-expiry-days' is non-nil,
-otherwise turn mode off."
+  "Turn `desirepath-cache-mode' on unless the cache is disabled.
+The cache is disabled when `desirepath--cache-enabled' is nil.
+`desirepath--cache-expiry-days' does not affect this decision: nil
+there means \"never expire\", not \"disable\"."
   (interactive)
   (if desirepath--cache-enabled
       (turn-on-desirepath-cache-mode)
     (turn-off-desirepath-cache-mode)))
 
-;;;}}}
 ;;;{{{ Advice code
 
 ;;; ############################ BEGIN FUNCTION -- advice instantiate
@@ -6302,11 +6330,10 @@ a missing file is not an error.  It is propagated to the original
 
 (defun desirepath-advice-instantiate ()
   "Install advice for `load'/`require'/`locate-library'/etc.
-Idempotent: advice that is already installed via `advice-add' is
-skipped, so calling this function twice (e.g. from `desirepath-install'
-and again from `desirepath-cache-mode') does not stack duplicate
-layers.  Uses `advice-add' (Emacs 24+); does not require the obsolete
-`advice.el'."
+Idempotent: advice already installed via `advice-add' is skipped.
+Advice on `autoload' is installed only when
+`desirepath--compression-support' is `all' (autoload cookies inside
+.el.gz files only make sense at that level)."
   (when (eq desirepath--compression-support 'all)
     (unless (advice-member-p #'desirepath--autoload-advice 'autoload)
       (advice-add 'autoload :around #'desirepath--autoload-advice)))
@@ -6677,21 +6704,24 @@ any N.N version."
 	path)))))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-setup (&optional no-cache force)
   "Add additional directories to `load-path'.
-If `desirepath--cache-expiry-days' is defined, use cached `load-path'
-If cache is too old, read directories under `desirepath--load-path-root'.
+Use the cached `load-path' unless NO-CACHE is non-nil or the cache
+is disabled via `desirepath--cache-enabled'.  If the cache is older
+than `desirepath--cache-expiry-days' (an integer), rebuild it; a nil
+`desirepath--cache-expiry-days' means \"never expire\", not \"disable
+cache\".
 
 Input:
 
-  NO-CACHE   If non-nil, do not use cache but read directories under
-	     `desirepath--load-path-root'.
+  NO-CACHE   If non-nil, ignore the cache and scan
+             `desirepath--load-path-root' directly.
   FORCE      Regenerate cache.
 
 References:
 
-  `desirepath--load-path-function'"
+  `desirepath--load-path-function'."
   (interactive "P")
   (if (or no-cache (null desirepath--cache-enabled))
       (funcall desirepath--load-path-function)
@@ -6769,8 +6799,7 @@ old Emacs, or `info.el' loaded partially)."
     ;;
     ;; Delay defining advises until this point
     ;;
-    ;; (unless (eq desirepath--compression-support 'none)
-    ;;   (desirepath-advice-instantiate))
+    (turn-on-desirepath-cache-mode-maybe)
     ;;
     ;;  Advice is installed by `turn-on-desirepath-cache-mode-maybe'
     ;;  below, which calls `desirepath-cache-mode' → `desirepath-advice-instantiate'.
