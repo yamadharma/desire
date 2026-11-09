@@ -2626,25 +2626,30 @@ An example:  /home/some/elisp/config/tinypah-cache-"
   (message "Desirepath: [VAR] desirepath--cache-file-prefix %s"
 	   (prin1-to-string desirepath--cache-file-prefix)))
 
-(defcustom desirepath--cache-file-hostname-function
-  'desirepath-cache-file-hostname
-  "*Function to return HOST for the cache file name.
+(defcustom desirepath--cache-file-hostname-function nil
+  "*Function to return HOST to embed in the cache file name, or nil.
 
-You're interested on this variable only if you're running several networked
-machines and 1) you always have same, ONE mounted $HOME directory 2) and
-each machine has its own run-files, like site-lisp.
+Default nil: the cache file name is
+``<prefix>-<type>-<version><postfix>``, e.g.
+``ecf-load-path-cache-emacs-31.1.elc``.  This is correct when
+`desirepath--cache-file-prefix' lives on local storage
+\(`$XDG_CACHE_HOME'/``~/.cache``), which is the case for almost all
+modern Emacs installations.
 
-Use value nil to disable using hostname in cache file name:
+Set to `desirepath-cache-file-hostname' only if `$HOME' (and hence
+the cache directory) is NFS-shared across hosts whose site-lisp trees
+differ:
 
-  (setq desirepath--cache-file-hostname-function nil)
+  (setq desirepath--cache-file-hostname-function
+        \\='desirepath-cache-file-hostname)
 
-To activate the hostname portion in cache name, set variable to like this:
-This makes each HOST have its own cache.
-
-  (setq desirepath--cache-file-hostname-function 'desirepath-cache-file-hostname)
+This makes each HOST have its own cache file, at the cost of
+rebuilding it independently on every machine.
 
 See manual \\[desirepath-version] for more information."
-  :type  'function
+  :type  '(choice
+           (const :tag "No hostname (local cache)" nil)
+           (function :tag "Function returning hostname"))
   :group 'Desirepath)
 
 (desirepath-verbose-macro 5
@@ -4487,51 +4492,43 @@ If FLAG is non-nil, return package names, not cache elements."
   )
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-cache-file-name ()
-  "Return Emacs version specific cache file.
+  "Return the Emacs-version-specific cache file name.
+
+The name has the form
+
+  <prefix>-<win32><cygwin><host-><type>-<version><postfix>
+
+where <host-> is only present when
+`desirepath--cache-file-hostname-function' is non-nil and returns a
+string (default: absent, see P2.5 / `desirepath--cache-file-hostname-function').
 
 References:
 
   `desirepath--cache-file-prefix'.
-  `desirepath--cache-file-postfix'"
-  (let* (host
-	 (type (if desirepath--xemacs-p
-		   "xemacs"
-		 "emacs"))
-	 (list (desirepath-emacs-versions))
-	 (ver  (or (nth 1 list)
-		   (nth 0 list)))
-	 (win32  (if desirepath--win32-p
-		     "win32-"
-		   ""))
-	 (cygwin (if desirepath--win32-cygwin-p
-		     "cygwin-"
-		   ""))
-	 (host-func desirepath--cache-file-hostname-function)
-	 ret)
-    (when (and host-func
-	       (functionp host-func))
-      (let (ret)
-	(setq ret (funcall host-func))
-	(desirepath-verbose-macro 5
-	  (message "Desirepath: CACHE file host function returned %s"
-		   (or ret "nil")))
-	(if (stringp ret)
-	    (setq host ret))))
-    (setq ret
-	  (concat desirepath--cache-file-prefix
-		  "-"
-		  win32
-		  cygwin
-		  (if (stringp host)
-		      (concat host "-")
-		    "")
-		  type
-		  "-"
-		  ver
-		  desirepath--cache-file-postfix))
-    ret))
+  `desirepath--cache-file-hostname-function'.
+  `desirepath--cache-file-postfix'."
+  (let* ((type   (if desirepath--xemacs-p "xemacs" "emacs"))
+         (ver    (or (nth 1 (desirepath-emacs-versions))
+                     (nth 0 (desirepath-emacs-versions))))
+         (win32  (if desirepath--win32-p       "win32-"  ""))
+         (cygwin (if desirepath--win32-cygwin-p "cygwin-" ""))
+         (host   (when (functionp desirepath--cache-file-hostname-function)
+                   (let ((h (funcall desirepath--cache-file-hostname-function)))
+                     (desirepath-verbose-macro 5
+                       (message "Desirepath: CACHE file host function returned %s"
+                                (or h "nil")))
+                     (and (stringp h) h)))))
+    (concat desirepath--cache-file-prefix
+            "-"
+            win32
+            cygwin
+            (if host (concat host "-") "")
+            type
+            "-"
+            ver
+            desirepath--cache-file-postfix)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
