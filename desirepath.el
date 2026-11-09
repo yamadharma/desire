@@ -2430,43 +2430,63 @@ Which package loads?
 		 (const t))
   :group 'Desirepath)
 
+(defcustom desirepath--cache-enabled t
+  "Whether `desirepath' uses its `load-path' cache at all.
+When nil, `desirepath' scans the filesystem on every startup
+instead of loading a cache from disk, and the advice on `load',
+`require', `locate-library', etc. is not installed.  Package loading
+is noticeably slower, but no stale cache can interfere.
+
+In a healthy setup leave this at the default t.  Set it to nil only
+when the cache has become corrupted or for debugging."
+  :type 'boolean
+  :group 'Desirepath)
+
 (defcustom desirepath--compression-support nil
-  "*Type of compression support: 'default, 'all or 'none.
-
-'default
-
-    Files ending to .gz and .bz2 files are counted in when
-    a load command is issued.
-
-'all
-
-    In addition to 'default, also autoloaded functions can be found from
-    compressed files. This means that statements like these will work:
-
-    (autoload 'jka-compr \"jka-compr\")
-
-    The recommendation is that you set this value to 'all if you keep your lisp
-    files in compressed format to save space.
+  "*Type of compression support for `load'/`require'/`autoload'.
 
 nil
+    No compression.  Search only .el and .elc files.
+    Recommended when you keep no compressed Lisp files: no extra
+    suffixes are tried, so package lookup is noticeably faster.
+    `desirepath--compressed-file-extensions' is effectively ignored.
 
-    Do not use compression support. Seach only .el and .elc files.
-    This is the recommended setting in case there is no need for
-    compressed files. It will speed searching considerably.
+`default'
+    In addition to .el/.elc, files ending in .gz and .bz2 are
+    considered when `load' or `require' is called.  `jka-compr' is
+    loaded automatically on demand, so `(load \"my-file\")' transparently
+    finds `my-file.el.gz' or `my-file.el.bz2' if present.  Compressed
+    files are also included in `desirepath--cache', so lookup is fast.
 
-    Variable `desirepath--compressed-file-extensions' is not used.
+`all'
+    In addition to `default', autoloaded functions can be resolved
+    from compressed files.  This means `;;;###autoload' cookies in
+    .el.gz files work; recommended if you keep Lisp sources
+    compressed to save space.
 
-'none
+This value must be set once, before `desirepath' is loaded.  Changing
+it afterwards has no effect.
 
-    Do not use cache at all. Use this if the cache is broken. In Total
-    emergency, call M-x -1 `desirepath-cache-mode' to disable all advises.
-
-This value must be set once, before package is loaded. Changing it afterwards
-has no effect."
-  :type '(choice (const default)
-		 (const all)
-		 (const none))
+To disable the cache entirely, see `desirepath--cache-enabled'.  The
+deprecated value `none' is accepted for backward compatibility and is
+translated to `desirepath--cache-enabled' = nil (see below)."
+  :type '(choice (const :tag "No compression" nil)
+                 (const :tag "Compression for load/require" default)
+                 (const :tag "Also autoload from compressed files" all)
+                 (const :tag "Deprecated (use desirepath--cache-enabled)" none))
   :group 'Desirepath)
+
+;; Migration: `'none' used to mean \"do not use cache at all\".
+;; Translate it to the new dedicated flag and warn.
+(when (eq desirepath--compression-support 'none)
+  (display-warning
+   'desirepath
+   "`desirepath--compression-support' = 'none is deprecated.
+It now means \"disable cache\"; set `desirepath--cache-enabled' = nil
+instead.  Auto-translating for this session."
+   :warning)
+  (setq desirepath--cache-enabled nil)
+  (setq desirepath--compression-support nil))
 
 (when (and (boundp 'command-line-args)
 	   (member "-debug-init" (symbol-value 'command-line-args)))
@@ -3780,16 +3800,19 @@ Please run \\[desirepath-cache-regenerate]"
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-file-extension-compressed (&optional list)
-  "Append `desirepath--compressed-file-extensions' to each element in LIST.
-If `desirepath--compression-support' is nil, then do nothing and return nil."
-  (let (ret)
-    (dolist (elt (or list '("")))
-      (when (stringp elt)
-	;;  `nreverse' is due to `push' which would change the order
-	(dolist (ext (reverse desirepath--compressed-file-extensions))
-	  (when (stringp ext)
-	    (push (concat elt ext) ret)))))
-    (nreverse ret)))
+  "Append compressed extensions to each element in LIST.
+Returns a list of (ELT + EXT) for each ELT in LIST and each EXT in
+`desirepath--compressed-file-extensions'.  Returns nil when
+`desirepath--compression-support' is nil, i.e. when no compression
+support is requested."
+  (when desirepath--compression-support
+    (let (ret)
+      (dolist (elt (or list '("")))
+        (when (stringp elt)
+          (dolist (ext (reverse desirepath--compressed-file-extensions))
+            (when (stringp ext)
+              (push (concat elt ext) ret)))))
+      (nreverse ret))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -4021,18 +4044,26 @@ Return t if path is ok for current Emacs."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-directory-lisp-p (path)
-  "Check if directory has any files matching regexp `\\.elc?'."
-  (cond
-   ((not (stringp path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: [error] directory entry %s" (prin1-to-string path))))
-   ((not (file-directory-p path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: [error] directory not found %s" path)))
-   (t
-    (cl-dolist (elt (directory-files path))
-      (when (string-match "\\.elc?" elt)
-	(cl-return t))))))
+  "Return non-nil if PATH is a directory containing Lisp files.
+When `desirepath--compression-support' is non-nil, .el.gz and .el.bz2
+count as Lisp files; otherwise only .el and .elc do."
+  (let ((regexp (if desirepath--compression-support
+                    "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                  "\\.elc?$")))
+    (cond
+     ((not (stringp path))
+      (desirepath-verbose-macro 5
+        (message "Desirepath: [error] directory entry %s" (prin1-to-string path)))
+      nil)
+     ((not (file-directory-p path))
+      (desirepath-verbose-macro 5
+        (message "Desirepath: [error] directory not found %s" path))
+      nil)
+     (t
+      (cl-dolist (elt (directory-files path))
+        (when (string-match regexp elt)
+          (cl-return t)))
+      nil))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -5535,34 +5566,31 @@ at all) skipped the bootstrap entirely."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-load-path-directory-files (path-list)
-  "Return all files along PATH-LIST."
+  "Return all files along PATH-LIST.
+When `desirepath--compression-support' is non-nil, files ending in
+.gz or .bz2 are included in addition to .el and .elc, matching the
+set of files that `locate-library' and `require' can actually find."
   (let ((count 0)
-	list)
+        (regexp (if desirepath--compression-support
+                    "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                  "\\.elc?$"))
+        list)
     (dolist (dir path-list)
       (when (and (stringp dir)
-		 (file-directory-p dir))
-	;;   make sure directory has a slash at the end
-	(setq dir (file-name-as-directory dir))
-	;;  Native Emacs Lisp scanner.  The external Perl helper
-	;;  (`emacs-util.pl') from older tiny-tools releases has been
-	;;  removed; the "TRAD" label is kept so existing logs remain
-	;;  greppable.
-	(desirepath-verbose-macro 1
-	  (message "Desirepath: TRAD Caching files... %d %s"
-		   (length list)
-		   dir))
-	(dolist (file (directory-files dir nil "\\.elc?$"))
-	  (unless (file-directory-p (concat dir file))
-	    (cl-incf count)
-	    (when (or t ) ;; (string-match "other" dir))
-	      (desirepath-verbose-macro 9
-		(message "Desirepath: TRAD Cached %s"
-			 (concat dir file))))
-	    (push (list file (cons count
-				   (desirepath-expand-file-name dir)))
-		  list)))))
-    ;; Preserve find order.
-    ;; (nreverse list)
+                 (file-directory-p dir))
+        (setq dir (file-name-as-directory dir))
+        (desirepath-verbose-macro 1
+          (message "Desirepath: TRAD Caching files... %d %s"
+                   (length list) dir))
+        (dolist (file (directory-files dir nil regexp))
+          (unless (file-directory-p (concat dir file))
+            (cl-incf count)
+            (desirepath-verbose-macro 9
+              (message "Desirepath: TRAD Cached %s"
+                       (concat dir file)))
+            (push (list file (cons count
+                                   (desirepath-expand-file-name dir)))
+                  list)))))
     list))
 
 ;;; ----------------------------------------------------------------------
@@ -6160,7 +6188,7 @@ Warning:
 Turn mode on only if `desirepath--cache-expiry-days' is non-nil,
 otherwise turn mode off."
   (interactive)
-  (if (integerp desirepath--cache-expiry-days)
+  (if desirepath--cache-enabled
       (turn-on-desirepath-cache-mode)
     (turn-off-desirepath-cache-mode)))
 
@@ -6279,8 +6307,9 @@ skipped, so calling this function twice (e.g. from `desirepath-install'
 and again from `desirepath-cache-mode') does not stack duplicate
 layers.  Uses `advice-add' (Emacs 24+); does not require the obsolete
 `advice.el'."
-  (unless (advice-member-p #'desirepath--autoload-advice 'autoload)
-    (advice-add 'autoload :around #'desirepath--autoload-advice))
+  (when (eq desirepath--compression-support 'all)
+    (unless (advice-member-p #'desirepath--autoload-advice 'autoload)
+      (advice-add 'autoload :around #'desirepath--autoload-advice)))
   (unless (advice-member-p #'desirepath--load-advice 'load)
     (advice-add 'load :around #'desirepath--load-advice))
   (unless (advice-member-p #'desirepath--load-library-advice 'load-library)
@@ -6664,8 +6693,7 @@ References:
 
   `desirepath--load-path-function'"
   (interactive "P")
-  (if (or no-cache
-	  (null desirepath--cache-expiry-days)) ;Cache is not allowed
+  (if (or no-cache (null desirepath--cache-enabled))
       (funcall desirepath--load-path-function)
     (desirepath-cache-setup-main force)))
 
@@ -6751,8 +6779,7 @@ old Emacs, or `info.el' loaded partially)."
     ;;
     (unless (fboundp 'font-lock-mode)
       (autoload 'font-lock-mode "font-lock"  "" t))
-    (unless (eq desirepath--compression-support 'none)
-      (turn-on-desirepath-cache-mode-maybe))
+    (turn-on-desirepath-cache-mode-maybe)
     ;; (desirepath-install-timer)       ;; Install watchdog to check load-path
     ;;  woman.el, man page viewer for Win32
     ;;  We do not load this, but define autoloads and then add the found
