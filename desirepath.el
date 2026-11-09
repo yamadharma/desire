@@ -6121,16 +6121,20 @@ Warning:
   packages or if you have added new Lisp files to your system. Keep also
   `desirepath--cache-expiry-days' relatively small if you update often."
   (interactive "P")
-  (desirepath-ti::bool-toggle desirepath--cache-mode mode)
-  (cond
-   (desirepath--cache-mode
-    (desirepath-advice-instantiate)
-    (if (called-interactively-p 'interactive)
-        (message "Desirepath: cache advice code ACTIVATED.")))
-   (t
-    (desirepath-advice-remove)
-    (if (called-interactively-p 'interactive)
-        (message "Desirepath: cache advice code DEACTIVATED.")))))
+  (let ((old desirepath--cache-mode))
+    (desirepath-ti::bool-toggle desirepath--cache-mode mode)
+    (cond
+     ((eq old desirepath--cache-mode)
+      ;; No state change: skip advice churn and log noise.
+      nil)
+     (desirepath--cache-mode
+      (desirepath-advice-instantiate)
+      (if (called-interactively-p 'interactive)
+          (message "Desirepath: cache advice code ACTIVATED.")))
+     (t
+      (desirepath-advice-remove)
+      (if (called-interactively-p 'interactive)
+          (message "Desirepath: cache advice code DEACTIVATED."))))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -6267,20 +6271,37 @@ a missing file is not an error.  It is propagated to the original
 
 (defun desirepath-advice-instantiate ()
   "Install advice for `load'/`require'/`locate-library'/etc.
-Uses `advice-add' (Emacs 24+); does not require obsolete `advice.el'."
-  (advice-add 'autoload       :around #'desirepath--autoload-advice)
-  (advice-add 'load           :around #'desirepath--load-advice)
-  (advice-add 'load-library   :around #'desirepath--load-library-advice)
-  (advice-add 'locate-library :around #'desirepath--locate-library-advice)
-  (advice-add 'require        :around #'desirepath--require-advice))
+Idempotent: advice that is already installed via `advice-add' is
+skipped, so calling this function twice (e.g. from `desirepath-install'
+and again from `desirepath-cache-mode') does not stack duplicate
+layers.  Uses `advice-add' (Emacs 24+); does not require the obsolete
+`advice.el'."
+  (unless (advice-member-p #'desirepath--autoload-advice 'autoload)
+    (advice-add 'autoload :around #'desirepath--autoload-advice))
+  (unless (advice-member-p #'desirepath--load-advice 'load)
+    (advice-add 'load :around #'desirepath--load-advice))
+  (unless (advice-member-p #'desirepath--load-library-advice 'load-library)
+    (advice-add 'load-library :around #'desirepath--load-library-advice))
+  (unless (advice-member-p #'desirepath--locate-library-advice 'locate-library)
+    (advice-add 'locate-library :around #'desirepath--locate-library-advice))
+  (unless (advice-member-p #'desirepath--require-advice 'require)
+    (advice-add 'require :around #'desirepath--require-advice)))
 
 (defun desirepath-advice-remove ()
-  "Remove advice installed by `desirepath-advice-instantiate'."
-  (advice-remove 'autoload       #'desirepath--autoload-advice)
-  (advice-remove 'load           #'desirepath--load-advice)
-  (advice-remove 'load-library   #'desirepath--load-library-advice)
-  (advice-remove 'locate-library #'desirepath--locate-library-advice)
-  (advice-remove 'require        #'desirepath--require-advice))
+  "Remove advice installed by `desirepath-advice-instantiate'.
+Idempotent: advice that is not installed is skipped, so calling this
+function twice (e.g. when the user toggles `desirepath-cache-mode' off
+twice) is a no-op."
+  (when (advice-member-p #'desirepath--autoload-advice 'autoload)
+    (advice-remove 'autoload #'desirepath--autoload-advice))
+  (when (advice-member-p #'desirepath--load-advice 'load)
+    (advice-remove 'load #'desirepath--load-advice))
+  (when (advice-member-p #'desirepath--load-library-advice 'load-library)
+    (advice-remove 'load-library #'desirepath--load-library-advice))
+  (when (advice-member-p #'desirepath--locate-library-advice 'locate-library)
+    (advice-remove 'locate-library #'desirepath--locate-library-advice))
+  (when (advice-member-p #'desirepath--require-advice 'require)
+    (advice-remove 'require #'desirepath--require-advice)))
 
 ;;; ############################ END FUNCTION -- end advice instantiate
 
@@ -6717,14 +6738,13 @@ old Emacs, or `info.el' loaded partially)."
     ;;
     ;; Delay defining advises until this point
     ;;
-    (unless (eq desirepath--compression-support 'none)
-      (desirepath-advice-instantiate))
+    ;; (unless (eq desirepath--compression-support 'none)
+    ;;   (desirepath-advice-instantiate))
     ;;
-    ;;  The autoload statements must be here, because `autoload' is
-    ;;  an advised function. The `fboundp' is just an extra measure,
-    ;;  so that it does not even call the advised-autoload function if
-    ;;  this file is loaded multiple times
-    ;;
+    ;;  Advice is installed by `turn-on-desirepath-cache-mode-maybe'
+    ;;  below, which calls `desirepath-cache-mode' → `desirepath-advice-instantiate'.
+    ;;  Calling `desirepath-advice-instantiate' here as well would be a
+    ;;  no-op after 14.1's idempotency guard, but it is redundant.
     ;;
     (unless (fboundp 'font-lock-mode)
       (autoload 'font-lock-mode "font-lock"  "" t))
