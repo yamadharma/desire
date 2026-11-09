@@ -15,7 +15,12 @@ import re
 import sys
 from pathlib import Path
 
-TARGETS = ["desire.el", "desire-straight.el", "desire-quelpa.el"]
+TARGETS = [
+    "desire.el",
+    "desire-straight.el",
+    "desire-quelpa.el",
+    "desirepath.el",
+]
 VERSION_RE = re.compile(r"^(;; Version:[ \t]*)(.+)$", re.MULTILINE)
 
 

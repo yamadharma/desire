@@ -17,7 +17,7 @@
 EMACS          ?= emacs
 PYTHON         ?= python3
 
-EL_FILES       := desire.el desire-straight.el desire-quelpa.el
+EL_FILES       := desire.el desire-straight.el desire-quelpa.el desirepath.el
 ELC_FILES      := $(EL_FILES:.el=.elc)
 TEST_DIR       ?= test
 TEST_FILE      := $(TEST_DIR)/desire-test.el

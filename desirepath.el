@@ -1,19 +1,21 @@
-;;; -*- mode: emacs-lisp; lexical-binding: t; coding: utf-8-unix; origami-fold-style: triple-braces; -*-
-;;; desirepath.el --- Manage Emacs startup dynamically
+;;; desirepath.el --- Manage Emacs startup dynamically  -*- lexical-binding: t; coding: utf-8-unix; origami-fold-style: triple-braces; -*-
 
-;; This file is not part of Emacs
+;; Authors:         Jari Aalto
+;;                  Dmitry S. Kulyabov <yamadharma@gmail.com>
+;; Maintainer:      Dmitry S. Kulyabov <yamadharma@gmail.com>
+;; Created:         2002
+;; Version:         1.3.0
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords:        convenience, extensions
+;; URL:             https://github.com/yamadharma/desire
+;; SPDX-License-Identifier: GPL-2.0-or-later
 
-;; Id {{{
+;; Copyright (C) 1999-2019 Jari Aalto
+;; Copyright (C) 2002-2026 Dmitry S. Kulyabov
 
-;; Copyright (C)    2002-2026 Dmitry S. Kulyabov
-;; Copyright (C)    1999-2019 Jari Aalto
-;; Keywords:        extensions
-;; Author:          Jari Aalto, Dmitry S. Kulyabov
-;; Maintainer:      Dmitry S. Kulyabov
-;;
+;; This file is not part of Emacs.
 
 ;; COPYRIGHT NOTICE
-;;
 ;; This program is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by the Free
 ;; Software Foundation; either version 2 of the License, or (at your option)
