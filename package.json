@@ -5,10 +5,10 @@
     "main": "index.js",
     "repository": "git@github.com:yamadharma/desire.git",
     "author": "Dmitry S. Kulyabov <yamadharma@gmail.com>",
-    "license": "GPL-3.0",
+    "license": "GPL-3.0-or-later",
     "config": {
         "commitizen": {
             "path": "cz-customizable"
         }
-    }    
+    }
 }

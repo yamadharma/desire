@@ -109,13 +109,31 @@ test:
 	  echo "test: $(TEST_FILE) not found; skipping"; \
 	fi
 
+.PHONY: check-license
+check-license:
+	@expected=$$(grep -o '"license"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | sed 's/.*"\([^"]*\)"$$/\1/'); \
+	if [ -z "$$expected" ]; then \
+	  echo "check-license: package.json has no license field"; exit 1; \
+	fi; \
+	fail=0; \
+	for f in $(EL_FILES); do \
+	  got=$$(grep -m1 'SPDX-License-Identifier:' "$$f" | sed 's/.*SPDX-License-Identifier:[[:space:]]*//; s/[[:space:]]*$$//'); \
+	  if [ "$$got" != "$$expected" ]; then \
+	    echo "$$f: SPDX=$$got, package.json=$$expected"; \
+	    fail=1; \
+	  fi; \
+	done; \
+	if [ "$$fail" = 1 ]; then exit 1; fi; \
+	echo "check-license: OK ($$expected)"
+
 # ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
 .PHONY: check
-check: check-version compile checkdoc package-lint test
+check: check-version check-license compile checkdoc package-lint test
 	@echo
 	@echo "All checks passed."
+
 
 # ---------------------------------------------------------------------------
 # Release helper (no git tag — только инструкция)

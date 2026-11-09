@@ -4,7 +4,7 @@
 ;; Package-Requires: ((emacs "24.3"))
 ;; Keywords: convenience
 ;; URL:             https://github.com/yamadharma/desire
-;; SPDX-License-Identifier: GPL-2.0-or-later
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
 ;;
