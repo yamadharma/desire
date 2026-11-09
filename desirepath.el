@@ -5,7 +5,7 @@
 
 ;; Id {{{
 
-;; Copyright (C)    2002-2024 Dmitry S. Kulyabov
+;; Copyright (C)    2002-2026 Dmitry S. Kulyabov
 ;; Copyright (C)    1999-2019 Jari Aalto
 ;; Keywords:        extensions
 ;; Author:          Jari Aalto, Dmitry S. Kulyabov
@@ -1297,8 +1297,7 @@
 (provide 'desirepath)
 
 (eval-when-compile
-  (require 'cl-lib)
-  (require 'advice))
+  (require 'cl-lib))
 
 (eval-and-compile
 
@@ -1319,8 +1318,6 @@
   (defvar font-lock-mode) ;; Byte compiler silencers
   (defvar lazy-lock-mode)
   (defvar dired-directory)
-
-  (autoload 'ti::macrof-version-bug-report  "tinylib" "" nil 'macro)
 
   (autoload 'pp                             "pp")
   (autoload 'executable-find                "executable")
@@ -3125,6 +3122,27 @@ VAR is set to following values when ARG is:
 
 ;;}}}
 ;;{{{ Duplicated functions
+;;; Functions in this section are adapted from Jari Aalto's tinylib.
+;;; Not all of them are still used; the ones that are listed below.
+;;;
+;;; Alive (2026-11):
+;;;   desirepath-ti::date-time-difference     – desirepath-install timing
+;;;   desirepath-ti::bool-toggle              – desirepath-cache-mode
+;;;   desirepath-ti::funcall                  – compat-timer-cancel
+;;;   desirepath-ti::string-remove-whitespace – report-mode
+;;;   desirepath-ti::vc-version-lessp         – gnus version compare
+;;;   desirepath-ti::pp-variable-list         – write-file-variable-state
+;;;   desirepath-ti::write-file-variable-state– cache-file-write
+;;;   desirepath-ti::compat-timer-*           – install-timer (opt-in)
+;;;   desirepath-ti::directory-recursive-do   – extra-path-setup
+;;;   desirepath-ti::win32-cygwin-p           – extra-path-root default
+;;;   desirepath-ti::dired-buffer             – report-mode-dired
+;;;   desirepath-ti::window-single-p          – report-mode-dired
+;;;   desirepath-replace-regexp-in-string     – load-path-dump (Win32)
+;;;   desirepath-ti::replace-match            – replace-regexp-in-string
+;;;
+;;; Removed in P3 (2026-11):
+;;;   desirepath-ti::advice-control           – superseded by desirepath-advice-instantiate
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy: tinylib.el
@@ -3322,35 +3340,6 @@ Input:
 	  (insert "'" (prin1-to-string (symbol-value var)) ")\n")))
       (insert (format "\n\n;; end of %s\n" file))
       (write-region (point-min) (point-max) file))))
-
-;;; ----------------------------------------------------------------------
-;;; #copy from tinylib.el
-(defun desirepath-ti::advice-control
-    (list regexp &optional disable verb msg)
-  "Enables/disable SINGLE-OR-LIST of advised functions that match REGEXP.
-Signals no errors, even if function in LIST is not advised.
-All advice classes ['any] are ena/disabled for REGEXP.
-
-Input:
-
-  LIST                  list of functions.
-  REGEXP                advice name regexp. Should normally have ^ anchor
-  DISABLE               flag, of non-nil then disable
-  VERB                  enable verbose messages
-  MSG                   display this message + on/off indication"
-  (dolist (func list)
-    (ignore-errors
-      (if disable
-	  (ad-disable-advice  func 'any regexp)
-	(ad-enable-advice     func 'any regexp))
-      (ad-activate func))) ;;change state
-  (if verb
-      (message
-       (concat
-	(or msg "advice(s): ")
-	(if disable
-	    "off"
-	  "on")))))
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy
@@ -4474,22 +4463,11 @@ If FLAG is non-nil, return package names, not cache elements."
     (nreverse list)))
 
 ;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-cache-file-hostname-old ()
-  "Return `system-name'."
-  (downcase
-   (or
-    (or
-     (getenv "HOST")		;Unix
-     (getenv "HOSTNAME")		;Unix
-     (getenv "COMPUTERNAME"))	;Win32
-    "unknownhost")
-   )
-  )
 
 (defun desirepath-cache-file-hostname ()
-  (downcase system-name)
-  )
+  "Return the current hostname for the cache file name.
+See `desirepath--cache-file-hostname-function'."
+  (downcase system-name))
 
 ;;; ----------------------------------------------------------------------
 
@@ -4517,7 +4495,7 @@ References:
          (host   (when (functionp desirepath--cache-file-hostname-function)
                    (let ((h (funcall desirepath--cache-file-hostname-function)))
                      (desirepath-verbose-macro 5
-                       (message "Desirepath: CACHE file host function returned %s"
+		       (message "Desirepath: CACHE file host function returned %s"
                                 (or h "nil")))
                      (and (stringp h) h)))))
     (concat desirepath--cache-file-prefix
@@ -4858,19 +4836,19 @@ Return:
                             (file-name-directory file)))))
           (dolist (entry entries)
             (unless (desirepath-info-directory-entry-p entry)
-              (goto-char (point-max))
-              (unless (looking-at "^[\n\t ]*$")
+	      (goto-char (point-max))
+	      (unless (looking-at "^[\n\t ]*$")
                 (insert "\n"))
-              (insert (format "* %s: (%s).\n" entry entry))
-              (desirepath-verbose-macro 2
+	      (insert (format "* %s: (%s).\n" entry entry))
+	      (desirepath-verbose-macro 2
                 (message "Desirepath: [INFO] added entry `%s' to file %s"
                          entry file))
-              (setq done t)
-              (set-buffer-modified-p nil)
-              (setq buffer-file (buffer-file-name)))))
+	      (setq done t)
+	      (set-buffer-modified-p nil)
+	      (setq buffer-file (buffer-file-name)))))
         (if (called-interactively-p 'interactive)
             (when done
-              (message "Desirepath: [INFO] Edit and verify changes at %s" file))
+	      (message "Desirepath: [INFO] Edit and verify changes at %s" file))
           (when (and done buffer-file)
             (desirepath-write-region (point-min) (point-max) buffer-file))
           (when (buffer-live-p buffer)
@@ -4943,21 +4921,21 @@ Return
            "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
            (prin1-to-string (desirepath-Info-default-directory-list))))
         (let* ((dir1 (file-name-as-directory dir))         ;; with slash
-               (dir2 (substring dir 0 (1- (length dir1)))) ;; without
-               (list (desirepath-Info-default-directory-list)))
+	       (dir2 (substring dir 0 (1- (length dir1)))) ;; without
+	       (list (desirepath-Info-default-directory-list)))
           (unless (or (member dir1 list)
-                      (member dir2 list))
+		      (member dir2 list))
             (desirepath-verbose-macro 2
-              (message
-               "Desirepath: [INFO] PUSH Info-default-directory-list => %s"
-               dir2))
+	      (message
+	       "Desirepath: [INFO] PUSH Info-default-directory-list => %s"
+	       dir2))
             (setq cleanup t)
             (set (desirepath-Info-default-directory-list-sym)
                  (cons dir2 (desirepath-Info-default-directory-list)))
             (desirepath-verbose-macro 5
-              (message
-               "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
-               (prin1-to-string (desirepath-Info-default-directory-list))))))
+	      (message
+	       "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list))))))
         ;;  Kill all previous info files from Emacs, so that next info
         ;;  C-h i will force Emacs to regenerate found new entries.
         (when (or cleanup                 ;Added new directory
@@ -6209,7 +6187,7 @@ EXTRA-ARGS are passed through unchanged for forward compatibility."
       (if path
           (progn
             (desirepath-verbose-macro 5
-              (message "Desirepath: (advice load) Cache hit %s" file))
+	      (message "Desirepath: (advice load) Cache hit %s" file))
             (apply orig path noerror nomessage nil nil extra-args))
         (apply orig file noerror nomessage nil nil extra-args)))))
 
@@ -6239,29 +6217,29 @@ a missing file is not an error.  It is propagated to the original
                    ((stringp file)
                     (if (string-match "/" file)
                         (desirepath-expand-file-name file)
-                      file))
+		      file))
                    (t (symbol-name feature))))
              (path (desirepath-cache-p-for-advice lib)))
         (if path
             (progn
-              (desirepath-verbose-macro 5
+	      (desirepath-verbose-macro 5
                 (message "Desirepath: (advice require) Cache hit %s" lib))
-              (unless noerror
+	      (unless noerror
                 (desirepath-cache-warn-if-not-exist path))
-              (push (cons feature path) alist)
-              (put 'require 'desirepath-load-list alist)
-              (funcall orig feature path noerror))
+	      (push (cons feature path) alist)
+	      (put 'require 'desirepath-load-list alist)
+	      (funcall orig feature path noerror))
           (funcall orig feature file noerror))))))
 
 (defun desirepath--locate-library-advice (orig library &optional nosuffix
-                                               path interactive-call)
+					       path interactive-call)
   "Advice for `locate-library': consult `desirepath--cache' first."
   (interactive
    (let ((cache (desirepath-emacs-lisp-file-list 'from-cache)))
      (list
       (completing-read
        (format "%slocate library: "
-               (if cache "(Desirepath cache)" ""))
+	       (if cache "(Desirepath cache)" ""))
        cache nil nil nil))))
   (unless (stringp library)
     (error "Parameter LIBRARY is not a string %s"
@@ -6269,13 +6247,13 @@ a missing file is not an error.  It is propagated to the original
   (let* ((ok      (desirepath-load-copy-equal-p))
          (cached  (and ok (desirepath-cache-p library)))
          (invalid (and ok cached
-                       (desirepath-cache-warn-if-not-exist cached)))
+		       (desirepath-cache-warn-if-not-exist cached)))
          (result
           (cond
            ((and cached (null invalid))
             (desirepath-verbose-macro 5
-              (message "Desirepath: (advice locate-library) Cache hit %s => %s"
-                       library cached))
+	      (message "Desirepath: (advice locate-library) Cache hit %s => %s"
+		       library cached))
             cached)
            ((and ok (car-safe (desirepath-locate-library library)))
             (car-safe (desirepath-locate-library library)))
@@ -6748,8 +6726,6 @@ old Emacs, or `info.el' loaded partially)."
     ;;  this file is loaded multiple times
     ;;
     ;;
-    (unless (fboundp 'ti::macrof-version-bug-report)
-      (autoload 'ti::macrof-version-bug-report "tinylib" "" nil 'macro))
     (unless (fboundp 'font-lock-mode)
       (autoload 'font-lock-mode "font-lock"  "" t))
     (unless (eq desirepath--compression-support 'none)
