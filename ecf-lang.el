@@ -1,6 +1,6 @@
 ;;; ecf-lang.el --- locale detection for desire  -*- lexical-binding: t; coding: utf-8-unix; -*-
 
-;; Version:         1.3.0
+;; Version:         1.4.0
 ;; Package-Requires: ((emacs "24.3"))
 ;; Keywords:        convenience, i18n
 ;; URL:             https://github.com/yamadharma/desire

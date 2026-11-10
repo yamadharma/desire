@@ -1,6 +1,6 @@
 ;;; utf-8.el --- UTF-8 coding for desire  -*- lexical-binding: t; coding: utf-8-unix; -*-
 
-;; Version:         1.3.0
+;; Version:         1.4.0
 ;; URL:             https://github.com/yamadharma/desire
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 

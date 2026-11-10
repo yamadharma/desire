@@ -1,3 +1,23 @@
+# [1.4.0](https://github.com/yamadharma/desire/compare/v1.3.0...v1.4.0) (2026-11-10)
+
+### Bug Fixes
+
+* **desirepath:** add version line ([1259922](https://github.com/yamadharma/desire/commit/1259922b4252bb23c608cc65e93117a38e081cd6))
+* **desirepath:** disable make dir in /usr/share/info/ ([ceac87b](https://github.com/yamadharma/desire/commit/ceac87b7f62485f5b486a29b72a7c973e7094775))
+* **desirepath:** fix advice ([17b90b5](https://github.com/yamadharma/desire/commit/17b90b5e7f3a70f102c3e9ccb9568a9b53843516))
+* **desirepath:** fix cache-enabled ([cb09568](https://github.com/yamadharma/desire/commit/cb09568c3ea1adf668fc606421235789324dc226))
+* **desirepath:** fix support compressed el-files ([34b7f1c](https://github.com/yamadharma/desire/commit/34b7f1c37667c0ed21dac4fe4fb61d0e494d0a94))
+* **desirepath:** p4.1 fix advice as idempotent ([09d686b](https://github.com/yamadharma/desire/commit/09d686b1ff3709e0c132ab32542cae04321edf8d))
+* **desirepath:** remove functions for external perl ([47e2848](https://github.com/yamadharma/desire/commit/47e2848ab30460e9446f4adce70d882df559c1ad))
+* **desirepath:** remove hostname from cache file name ([48298c0](https://github.com/yamadharma/desire/commit/48298c03da8d0a5079a5b5ff81a8af464b0c9c4d))
+* **desirepath:** remove some bias ([e3ebd97](https://github.com/yamadharma/desire/commit/e3ebd9796769303de5dfd851eb8dc0fe1ea85386))
+* **desirepath:** remove stale code ([8d57343](https://github.com/yamadharma/desire/commit/8d57343fa13e777651e2ef05f88c43b1f45ff459))
+* **desire:** update headers ([9ecb2d1](https://github.com/yamadharma/desire/commit/9ecb2d14e4cad4200a02b479e60f9651b260fac8))
+
+### Features
+
+* **desire:** relicense from GPL-2.0-or-later to GPL-3.0-or-later ([a256d82](https://github.com/yamadharma/desire/commit/a256d82fdea0c4106d19686bd17b4ce45921d82d))
+
 # [1.3.0](https://github.com/yamadharma/desire/compare/v1.2.0...v1.3.0) (2026-11-03)
 
 ### Bug Fixes
