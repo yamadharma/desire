@@ -4,7 +4,7 @@
 ;;                  Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Maintainer:      Dmitry S. Kulyabov <yamadharma@gmail.com>
 ;; Created:         2002
-;; Version:         1.3.0
+;; Version:         1.4.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords:        convenience, extensions
 ;; URL:             https://github.com/yamadharma/desire
