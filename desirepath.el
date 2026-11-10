@@ -1,22 +1,25 @@
-;;; -*- mode: emacs-lisp; lexical-binding: t; coding: utf-8-unix; origami-fold-style: triple-braces; -*-
-;;; desirepath.el --- Manage Emacs startup dynamically
+;;; desirepath.el --- Manage Emacs startup dynamically  -*- lexical-binding: t; coding: utf-8-unix; origami-fold-style: triple-braces; -*-
 
-;; This file is not part of Emacs
+;; Authors:         Jari Aalto
+;;                  Dmitry S. Kulyabov <yamadharma@gmail.com>
+;; Maintainer:      Dmitry S. Kulyabov <yamadharma@gmail.com>
+;; Created:         2002
+;; Version:         1.4.0
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords:        convenience, extensions
+;; URL:             https://github.com/yamadharma/desire
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; Id {{{
+;; Copyright (C) 1999-2019 Jari Aalto
+;; Copyright (C) 2002-2026 Dmitry S. Kulyabov
 
-;; Copyright (C)    2002-2024 Dmitry S. Kulyabov
-;; Copyright (C)    1999-2019 Jari Aalto
-;; Keywords:        extensions
-;; Author:          Jari Aalto, Dmitry S. Kulyabov
-;; Maintainer:      Dmitry S. Kulyabov
-;;
+;; This file is not part of Emacs.
 
 ;; COPYRIGHT NOTICE
 ;;
-;; This program is free software; you can redistribute it and/or modify it
+;; This program is free software: you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by the Free
-;; Software Foundation; either version 2 of the License, or (at your option)
+;; Software Foundation, either version 3 of the License, or (at your option)
 ;; any later version.
 ;;
 ;; This program is distributed in the hope that it will be useful, but
@@ -25,12 +28,12 @@
 ;; for more details.
 ;;
 ;; You should have received a copy of the GNU General Public License
-;; along with this program. If not, see <http://www.gnu.org/licenses/>.
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ;;
-;; Visit <http://www.gnu.org/copyleft/gpl.html> for more information
+;; Visit <https://www.gnu.org/copyleft/gpl.html> for more information
 
 ;;}}}
-;; Install {{{ 
+;; Install {{{
 
 ;; ....................................................... &t-install ...
 ;;
@@ -151,7 +154,7 @@
 ;;      *******************************************************************
 
 ;;}}}
-;; Documentation {{{ 
+;; Documentation {{{
 
 ;; ..................................................... &t-commentary ...
 
@@ -1297,8 +1300,7 @@
 (provide 'desirepath)
 
 (eval-when-compile
-  (require 'cl-lib)
-  (require 'advice))
+  (require 'cl-lib))
 
 (eval-and-compile
 
@@ -1319,8 +1321,6 @@
   (defvar font-lock-mode) ;; Byte compiler silencers
   (defvar lazy-lock-mode)
   (defvar dired-directory)
-
-  (autoload 'ti::macrof-version-bug-report  "tinylib" "" nil 'macro)
 
   (autoload 'pp                             "pp")
   (autoload 'executable-find                "executable")
@@ -1364,12 +1364,21 @@ Set to non-nil for initial uses of this package first
 to see messages that may need attention. The messages can be recalled
 from the *Messages* buffer.")
 
-  ;;  This is just forward declaration for byte compiler
-  ;;  It it not sensible to lift `defcustom' definition apart from
-  ;;  to the beginning of file due to macros and all which refer to it.
-  ;;  => This is a user variable and defcustom should stay in user section.
-  (defvar desirepath--verbose 3
+  ;;  This is just forward declaration for byte compiler.
+  ;;  Default 1: только ключевые сообщения (BEGIN/END, status).  Set to
+  ;;  2/3/5 for more; 20 for "everything, logged to file".
+  (defvar desirepath--verbose 1
     "*Verbosity level"))
+
+;;;; `Info-directory-list' is declared (bound to nil) so that
+;;;; eager macro-expansion and byte-compilation of code that references
+;;;; `desirepath-Info-default-directory-list' do not raise
+;;;; `void-variable'.  The real value is populated lazily by
+;;;; `desirepath--info-ensure-initialized', called from
+;;;; `desirepath-install'.  Do NOT use `eval-when-compile' here:
+;;;; `require 'info' at compile time pulls info.el into the compilation
+;;;; environment but does not bind the variable at runtime.
+(defvar Info-directory-list nil)
 
 ;;}}}
 ;;{{{ Environment
@@ -1401,17 +1410,19 @@ from the *Messages* buffer.")
   "The value is non-nil if running under Win32 Cygwin Emacs.")
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-tmp-message (msg)
-  "Print messages to user."
+  "Print messages to user.
+The message is always appended to `*Messages*'; the dedicated
+`*desirepath.el ERROR*' buffer is only popped up when
+`desirepath--startup-no-messages' is nil."
   (let ((buffer (get-buffer-create "*desirepath.el ERROR*")))
     (with-current-buffer buffer
-      (goto-char (point-min))
-      (insert msg) ;; Insert message first
-      ;; Make a record to *Messages* buffer as well.
-      (message msg)
-      (unless desirepath--startup-no-messages
-	(pop-to-buffer buffer)))))
+      (goto-char (point-max))
+      (insert msg))
+    (message "%s" msg)
+    (unless desirepath--startup-no-messages
+      (pop-to-buffer buffer))))
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy from tinyliba.el
@@ -1577,429 +1588,435 @@ from the *Messages* buffer.")
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-byte-compile-running-p ()
-  "Return non-nil if byte compiling file."
-  (or (string= (buffer-name) " *Compiler Input*")
-      (string-match "batch-byte-compile"
-		    (prin1-to-string command-line-args))))
+  (defun desirepath-byte-compile-running-p ()
+    "Return non-nil if byte compiling file."
+    (or (string= (buffer-name) " *Compiler Input*")
+	(string-match "batch-byte-compile"
+		      (prin1-to-string command-line-args))))
 
 ;;; ----------------------------------------------------------------------
-;;; Only some values are recorded as messages to the *Messages* buffer
-;;; Showing the values possibly makes user think if he needs
-;;; to change the defaults.
-;;;
-(put 'desirepath-set-default-value-macro 'lisp-indent-function 1)
-(put 'desirepath-set-default-value-macro 'edebug-form-spec '(body))
-(defmacro desirepath-set-default-value-macro (var &rest body)
-  "Print verbose messages when activating VAR and run BODY."
-  `(let (val)
-     ;;  This may call several functions.
-     (setq val ,@body)
-     (unless (desirepath-byte-compile-running-p)
-       (message "Desirepath: Default value for `%s' ... %s"
-		,var
-		(prin1-to-string val)))
-     val))
+;;;; Only some values are recorded as messages to the *Messages* buffer
+;;;; Showing the values possibly makes user think if he needs
+;;;; to change the defaults.
+
+  (put 'desirepath-set-default-value-macro 'lisp-indent-function 1)
+  (put 'desirepath-set-default-value-macro 'edebug-form-spec '(body))
+  (defmacro desirepath-set-default-value-macro (var &rest body)
+    "Print verbose messages when activating VAR and run BODY.
+Messages are emitted only when `desirepath--verbose' is greater than 3;
+the default value is 1, so the default run is silent.  The macro is
+used in `defcustom' forms; the value is visible via `M-x
+describe-variable' anyway."
+    `(let (val)
+       ;;  This may call several functions.
+       (setq val ,@body)
+       (when (and (not (desirepath-byte-compile-running-p))
+                  (integerp desirepath--verbose)
+                  (> desirepath--verbose 3))
+	 (message "Desirepath: Default value for `%s' ... %s"
+		  ,var
+		  (prin1-to-string val)))
+       val))
+
+;;; ----------------------------------------------------------------------
+
+  (put 'desirepath-verbose-macro 'lisp-indent-function 1)
+  (defmacro desirepath-verbose-macro (level &rest body)
+    "When LEVEL is =< `desirepath--verbose' run BODY."
+    `(when (and (numberp desirepath--verbose)
+		(or (= ,level desirepath--verbose)
+		    (< ,level desirepath--verbose)))
+       ,@body
+       (when (> desirepath--verbose 19)
+	 (desirepath-log-write))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(put 'desirepath-verbose-macro 'lisp-indent-function 1)
-(defmacro desirepath-verbose-macro (level &rest body)
-  "When LEVEL is =< `desirepath--verbose' run BODY."
-  `(when (and (numberp desirepath--verbose)
-	      (or (= ,level desirepath--verbose)
-		  (< ,level desirepath--verbose)))
-     ,@body
-     (when (> desirepath--verbose 19)
-       (desirepath-log-write))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(put 'desirepath-directory-sep-char-macro 'lisp-indent-function 0)
-(defmacro desirepath-directory-sep-char-macro (&rest body)
-  "Emacs and XEmacs compatibility.
+  (put 'desirepath-directory-sep-char-macro 'lisp-indent-function 0)
+  (defmacro desirepath-directory-sep-char-macro (&rest body)
+    "Emacs and XEmacs compatibility.
 In let, set `directory-sep-char' to / and run BODY."
-  (let ((sym 'directory-sep-char))
-    (if (and (boundp sym)
-	     (or (string< emacs-version "21.1")	;; Obsolete in 21.1+
-		 desirepath--xemacs-p))
-	`(desirepath-with-let-variable directory-sep-char ?/
-	   ,@body)
-      `(progn
-	 ,@body))))
+    (let ((sym 'directory-sep-char))
+      (if (and (boundp sym)
+	       (or (string< emacs-version "21.1")	;; Obsolete in 21.1+
+		   desirepath--xemacs-p))
+	  `(desirepath-with-let-variable directory-sep-char ?/
+	     ,@body)
+	`(progn
+	   ,@body))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defsubst desirepath-expand-file-name (path)
-  "Expand filenames and always use forward slashes."
-  (cond
-   ((and (not desirepath--win32-p)
-	 ;; Nothing to do
-	 (string-match "^/" path)
-	 (not (string-match "\.\." path))))
-   (t
-    (desirepath-directory-sep-char-macro
-     (setq path (expand-file-name path)))))
-  (if desirepath--win32-p
-      (setq path (downcase path)))
-  path)
+  (defsubst desirepath-expand-file-name (path)
+    "Expand filenames and always use forward slashes."
+    (cond
+     ((and (not desirepath--win32-p)
+	   ;; Nothing to do
+	   (string-match "^/" path)
+	   (not (string-match "\.\." path))))
+     (t
+      (desirepath-directory-sep-char-macro
+	(setq path (expand-file-name path)))))
+    (if desirepath--win32-p
+	(setq path (downcase path)))
+    path)
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(put 'desirepath-expand-file-name-variable-macro  'lisp-indent-function 0)
-(defmacro desirepath-expand-file-name-variable-macro (var)
-  "Expand list of paths stored in VAR symbol."
-  `(let (list)
-     (dolist (path ,var)
+  (put 'desirepath-expand-file-name-variable-macro  'lisp-indent-function 0)
+  (defmacro desirepath-expand-file-name-variable-macro (var)
+    "Expand list of paths stored in VAR symbol."
+    `(let (list)
+       (dolist (path ,var)
 ;;;        (push (desirepath-expand-file-name path) list))
-       (setq list (cons path list)))
-     (setq ,var (nreverse list))))
+	 (setq list (cons path list)))
+       (setq ,var (nreverse list))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-message-bug (bug &optional die)
-  "Tell how to report BUG (string) and optionally DIE."
-  (let ((msg
-	 (substitute-command-keys
-	  (concat
-	   (format
-	    "Desirepath: [ERROR] report bug with name [%s]"
-	    bug)
-	   "See also \\[desirepath-version]"))))
-    (if die
-	(error msg)
-      (message msg)
-      (sit-for 5))))
+  (defun desirepath-message-bug (bug &optional die)
+    "Tell how to report BUG (string) and optionally DIE."
+    (let ((msg
+	   (substitute-command-keys
+	    (concat
+	     (format
+	      "Desirepath: [ERROR] report bug with name [%s]"
+	      bug)
+	     "See also \\[desirepath-version]"))))
+      (if die
+	  (error msg)
+	(message msg)
+	(sit-for 5))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-directory-up (dir)
-  "Return precious DIR."
-  (setq dir (file-name-as-directory dir)) ;; Ensure trailing slash
-  (when (stringp dir)
-    (file-name-directory
-     ;; Delete trailing slash
-     (substring dir
-		0
-		(1- (length dir))))))
+  (defun desirepath-directory-up (dir)
+    "Return precious DIR."
+    (setq dir (file-name-as-directory dir)) ;; Ensure trailing slash
+    (when (stringp dir)
+      (file-name-directory
+       ;; Delete trailing slash
+       (substring dir
+		  0
+		  (1- (length dir))))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-directory-subdirs (dir)
-  "Return directories under DIR."
-  (let (list)
-    (when (file-directory-p dir)
-      (dolist (elt (directory-files dir 'full))
-	(if (file-directory-p elt)
+  (defun desirepath-directory-subdirs (dir)
+    "Return directories under DIR."
+    (let (list)
+      (when (file-directory-p dir)
+	(dolist (elt (directory-files dir 'full))
+	  (if (file-directory-p elt)
 ;;;            (push elt list)
-	    (setq list (cons elt list)))))
-    list))
+	      (setq list (cons elt list)))))
+      list))
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy: tinyliba.el
 ;;;
-(defun desirepath-ti::win32-cygwin-p (&optional use-cache)
-  "Return root if path to cygwin1.dll is found from `exec-path'.
+  (defun desirepath-ti::win32-cygwin-p (&optional use-cache)
+    "Return root if path to cygwin1.dll is found from `exec-path'.
 If USE-CACHE is non-nil, retrieve cached value."
-  (let (ret)
-    (cond
-     ((and use-cache
-	   (get 'desirepath-ti::win32-cygwin-p 'cache-set))
-      (setq ret (get 'desirepath-ti::win32-cygwin-p 'cache-value)))
-     (t
-      (put 'desirepath-ti::win32-cygwin-p 'cache-set t)
-      (cl-dolist (path exec-path)
-	(when (and (stringp path)
-		   (file-exists-p
-		    (concat
-		     (file-name-as-directory path) "cygwin1.dll"))
-		   (file-exists-p
-		    (concat
-		     (file-name-as-directory path) "cygpath.exe")))
-	  ;;  The root directory is one DIR up from bin/cygwin1.dll
-	  ;;
-	  ;;  1) Drop the trailing slash  ../bin
-	  ;;  2) Give one directory up    ..
-	  ;;
-	  ;;  We have to leave trailing slash, because the resulting
-	  ;;  directory may be in the worst case C:/
-	  ;;  (which is NOT recommended place for cygwin install)
-	  ;;
-	  (when (string-match "^\\(.*\\)[/\\]" path)
-	    (setq path
-		  (match-string 1 path))
-	    (setq ret path)
-	    ;;  This is native Cygwin Emacs, not a Win32 version
-	    ;;  if path is empty: /bin => one up => ''
-	    (when (string= ret "")
-	      (setq ret "/"))
-	    (put 'desirepath-ti::win32-cygwin-p 'cache-value ret)
-	    (cl-return))))))
-    ret))
+    (let (ret)
+      (cond
+       ((and use-cache
+	     (get 'desirepath-ti::win32-cygwin-p 'cache-set))
+	(setq ret (get 'desirepath-ti::win32-cygwin-p 'cache-value)))
+       (t
+	(put 'desirepath-ti::win32-cygwin-p 'cache-set t)
+	(cl-dolist (path exec-path)
+	  (when (and (stringp path)
+		     (file-exists-p
+		      (concat
+		       (file-name-as-directory path) "cygwin1.dll"))
+		     (file-exists-p
+		      (concat
+		       (file-name-as-directory path) "cygpath.exe")))
+	    ;;  The root directory is one DIR up from bin/cygwin1.dll
+	    ;;
+	    ;;  1) Drop the trailing slash  ../bin
+	    ;;  2) Give one directory up    ..
+	    ;;
+	    ;;  We have to leave trailing slash, because the resulting
+	    ;;  directory may be in the worst case C:/
+	    ;;  (which is NOT recommended place for cygwin install)
+	    ;;
+	    (when (string-match "^\\(.*\\)[/\\]" path)
+	      (setq path
+		    (match-string 1 path))
+	      (setq ret path)
+	      ;;  This is native Cygwin Emacs, not a Win32 version
+	      ;;  if path is empty: /bin => one up => ''
+	      (when (string= ret "")
+		(setq ret "/"))
+	      (put 'desirepath-ti::win32-cygwin-p 'cache-value ret)
+	      (cl-return))))))
+      ret))
 
 ;;; ----------------------------------------------------------------------
 ;;; Earlier XEmacs and Emacs `executable-find' functions are buggy
 ;;; and do not find binaries correctly, so we use our own implemantation.
 ;;;
-(defun desirepath-executable-find (file)
-  "Find FILE along path. FILE must be absolute name with possible .exe
+  (defun desirepath-executable-find (file)
+    "Find FILE along path. FILE must be absolute name with possible .exe
 Emacs `executable-find' tries various suffixes in Win32, but this
 function just looks if FILE exists along load path."
-  (let (ret name)
-    (cl-dolist (path exec-path)
-      (setq name (concat (file-name-as-directory path) file))
-      (when (and (not (file-directory-p name))
-		 (file-exists-p name))
-	(setq ret (desirepath-expand-file-name name))
-	(cl-return)))
-    ret))
+    (let (ret name)
+      (cl-dolist (path exec-path)
+	(setq name (concat (file-name-as-directory path) file))
+	(when (and (not (file-directory-p name))
+		   (file-exists-p name))
+	  (setq ret (desirepath-expand-file-name name))
+	  (cl-return)))
+      ret))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-executable-find-binary (file)
-  "Try finding binary: FILE or FILE.exe in win32."
-  (if desirepath--win32-p
-      (desirepath-executable-find (concat file ".exe"))
-    (desirepath-executable-find file)))
+  (defun desirepath-executable-find-binary (file)
+    "Try finding binary: FILE or FILE.exe in win32."
+    (if desirepath--win32-p
+	(desirepath-executable-find (concat file ".exe"))
+      (desirepath-executable-find file)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-emacs-versions (&optional noerr cache)
-  "Return possible version numbers for current Emacs. NOERR.
+  (defun desirepath-emacs-versions (&optional noerr cache)
+    "Return possible version numbers for current Emacs. NOERR.
 If CACHE is set, use cached value."
-  (interactive)
-  (if (and cache
-	   (get 'desirepath-emacs-versions 'version))
-      (get 'desirepath-emacs-versions 'version)
-    (let* ((str (emacs-version))
-	   ;;   XEmacs beta has spaces in this variable. Just take
-	   ;;   the first word from it. There must be no spaces
-	   ;;   in filename returned from this function
-	   ;;
-	   ;;   emacs-version: "21.2  (beta19) \"Shinjuku\" XEmacs Lucid"
-	   (patch          (progn
-			     (cond
-			      ((string-match "patch \\([0-9]+\\)" str)
-			       (match-string 1 str))
-			      ;;  XEmacs 21.1  (beta23)
-			      ((string-match "(beta\\([0-9]+\\))" str)
-			       (match-string 1 str)))))
-	   (major-version-x-x  (progn
-				 (string-match "[0-9]+\\.[.0-9]" str)
-				 (match-string 0 str)))
-	   (major-version  (progn
-			     (string-match "[0-9]+\\.[.0-9]+" str)
-			     (match-string 0 str)))
-	   (version        (concat major-version ;; 20.6.1
-				   (if patch
-				       (concat "." patch)
-				     "")))
-	   ret)
-      (dolist (ver (list  version  major-version major-version-x-x))
-	(when ver
-	  (cl-pushnew ver ret :test 'string=)))
-      (when ret
-	(put 'desirepath-emacs-versions 'version ret))
-      (or ret
-	  (and (null noerr)
-	       (desirepath-message-bug "Can't parse `emacs-version'."))))))
+    (interactive)
+    (if (and cache
+	     (get 'desirepath-emacs-versions 'version))
+	(get 'desirepath-emacs-versions 'version)
+      (let* ((str (emacs-version))
+	     ;;   XEmacs beta has spaces in this variable. Just take
+	     ;;   the first word from it. There must be no spaces
+	     ;;   in filename returned from this function
+	     ;;
+	     ;;   emacs-version: "21.2  (beta19) \"Shinjuku\" XEmacs Lucid"
+	     (patch          (progn
+			       (cond
+				((string-match "patch \\([0-9]+\\)" str)
+				 (match-string 1 str))
+				;;  XEmacs 21.1  (beta23)
+				((string-match "(beta\\([0-9]+\\))" str)
+				 (match-string 1 str)))))
+	     (major-version-x-x  (progn
+				   (string-match "[0-9]+\\.[.0-9]" str)
+				   (match-string 0 str)))
+	     (major-version  (progn
+			       (string-match "[0-9]+\\.[.0-9]+" str)
+			       (match-string 0 str)))
+	     (version        (concat major-version ;; 20.6.1
+				     (if patch
+					 (concat "." patch)
+				       "")))
+	     ret)
+	(dolist (ver (list  version  major-version major-version-x-x))
+	  (when ver
+	    (cl-pushnew ver ret :test 'string=)))
+	(when ret
+	  (put 'desirepath-emacs-versions 'version ret))
+	(or ret
+	    (and (null noerr)
+		 (desirepath-message-bug "Can't parse `emacs-version'."))))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-emacs-root-by-other-methods ()
-  "Return ROOT of emacs installation directory."
-  (let* ((sym  'invocation-directory)
-	 ;;  Use `symbol-value' to compile cleanly in all
-	 ;;  Emacs and XEmacs versions. It just hides the variable form
-	 ;;  Byte compiler
-	 (val  (if (and (boundp sym)
-			(stringp (symbol-value sym)))
-		   (symbol-value sym)))
-	 (dir  (and val
-		    (file-directory-p val)
-		    (file-name-as-directory val))))
-    (when dir
-      (desirepath-directory-up dir))))
+  (defun desirepath-emacs-root-by-other-methods ()
+    "Return ROOT of emacs installation directory."
+    (let* ((sym  'invocation-directory)
+	   ;;  Use `symbol-value' to compile cleanly in all
+	   ;;  Emacs and XEmacs versions. It just hides the variable form
+	   ;;  Byte compiler
+	   (val  (if (and (boundp sym)
+			  (stringp (symbol-value sym)))
+		     (symbol-value sym)))
+	   (dir  (and val
+		      (file-directory-p val)
+		      (file-name-as-directory val))))
+      (when dir
+	(desirepath-directory-up dir))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-emacs-core-path-p (path &optional version)
-  "Test if PATH is core Emacs path. VERSION number can be found from path."
-  ;;  PATH name must contain version for this emacs and subdirectory "lisp"
-  (and (if version
-	   (string-match (regexp-quote version) path)
-	 t)
-       ;; /usr/local/share/emacs/20.7/site-lisp
-       (string-match "[/\\]lisp" path)
-       (string-match (concat
-		      ;;  Win32 installs emacs-20.4
-		      "^.*emacs-[0-9]+\\.+[0-9.-]+"
-		      ;;  Unix installs emacs/20.4
-		      "\\|^.*emacs[/\\][0-9]+\\.+[0-9.-]+")
-		     path)))
+  (defun desirepath-emacs-core-path-p (path &optional version)
+    "Test if PATH is core Emacs path. VERSION number can be found from path."
+    ;;  PATH name must contain version for this emacs and subdirectory "lisp"
+    (and (if version
+	     (string-match (regexp-quote version) path)
+	   t)
+	 ;; /usr/local/share/emacs/20.7/site-lisp
+	 (string-match "[/\\]lisp" path)
+	 (string-match (concat
+			;;  Win32 installs emacs-20.4
+			"^.*emacs-[0-9]+\\.+[0-9.-]+"
+			;;  Unix installs emacs/20.4
+			"\\|^.*emacs[/\\][0-9]+\\.+[0-9.-]+")
+		       path)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-emacs-root-by-load-path ()
-  "Return ROOT of emacs installation directory by reading `load-path'.
+  (defun desirepath-emacs-root-by-load-path ()
+    "Return ROOT of emacs installation directory by reading `load-path'.
 Return:
 
    '(matched-part original-path)."
-  (let ((ver (car-safe (desirepath-emacs-versions 'noerr 'cache)))
-	ret)
-    (if (null ver)
-	(desirepath-message-bug "root-by-load-path")
-      (cl-dolist (path load-path)
-	(when (and (stringp path)
-		   (desirepath-emacs-core-path-p path ver))
-	  (cl-return
-	   (setq ret (list
-		      (match-string 0 path)
-		      path))))))
-    (unless ret
-      ;; User has wiped the load-path information by accident,
-      ;; Try doing something about it.
-      ;;
-      ;; #todo: Should we restore part of the path from $EMACSLOADPATH ?
-      ;; --> I'm afraid not many set the variable at all
-      (let ((path (desirepath-emacs-root-by-other-methods)))
-	(if path
-	    (setq ret (list path path)))))
-    (desirepath-verbose-macro 7
-      (message "Desirepath: EMACS ROOT %s" (or (car-safe ret) "<nil>")))
-    ret))
+    (let ((ver (car-safe (desirepath-emacs-versions 'noerr 'cache)))
+	  ret)
+      (if (null ver)
+	  (desirepath-message-bug "root-by-load-path")
+	(cl-dolist (path load-path)
+	  (when (and (stringp path)
+		     (desirepath-emacs-core-path-p path ver))
+	    (cl-return
+	     (setq ret (list
+			(match-string 0 path)
+			path))))))
+      (unless ret
+	;; User has wiped the load-path information by accident,
+	;; Try doing something about it.
+	;;
+	;; #todo: Should we restore part of the path from $EMACSLOADPATH ?
+	;; --> I'm afraid not many set the variable at all
+	(let ((path (desirepath-emacs-root-by-other-methods)))
+	  (if path
+	      (setq ret (list path path)))))
+      (desirepath-verbose-macro 7
+	(message "Desirepath: EMACS ROOT %s" (or (car-safe ret) "<nil>")))
+      ret))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun  desirepath-emacs-root-directory ()
-  "Return Emacs installation root directory."
-  (cond
-   ((and invocation-directory
-	 ;;  In Unix this is /usr/local/bin  which is NOT the
-	 ;;  Emacs installatio place.
-	 ;;
-	 ;;  In Win32 this is c:/.....emacs-21.3/bin/ which
-	 ;;  can be used
-	 (file-directory-p (concat invocation-directory "../lisp")))
-    (desirepath-expand-file-name
-     (concat invocation-directory "../lisp")))
-   (t
-    (car-safe (desirepath-emacs-root-by-load-path)))))
+  (defun  desirepath-emacs-root-directory ()
+    "Return Emacs installation root directory."
+    (cond
+     ((and invocation-directory
+	   ;;  In Unix this is /usr/local/bin  which is NOT the
+	   ;;  Emacs installatio place.
+	   ;;
+	   ;;  In Win32 this is c:/.....emacs-21.3/bin/ which
+	   ;;  can be used
+	   (file-directory-p (concat invocation-directory "../lisp")))
+      (desirepath-expand-file-name
+       (concat invocation-directory "../lisp")))
+     (t
+      (car-safe (desirepath-emacs-root-by-load-path)))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-load-path-string-match (regexp)
-  "Check if REGEXP is found form load path. Return first match."
-  (cl-dolist (path load-path)
-    (when (and (stringp path)
-	       (string-match regexp path))
-      (cl-return path))))
+  (defun desirepath-load-path-string-match (regexp)
+    "Check if REGEXP is found form load path. Return first match."
+    (cl-dolist (path load-path)
+      (when (and (stringp path)
+		 (string-match regexp path))
+	(cl-return path))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-load-path-add-subdirs (root &optional verbose)
-  "Add all subdirectories of ROOT to `load-path' with VERBOSE message level.
+  (defun desirepath-load-path-add-subdirs (root &optional verbose)
+    "Add all subdirectories of ROOT to `load-path' with VERBOSE message level.
 ROOT can be a single directory or list of directories."
-  (cond
-   ((stringp root)
-    (setq root (list root)))
-   ((listp root)
-    nil)
-   (t
-    (error "Incorrect ROOT parameter value: %s" root)))
-  (dolist (dir root)
-    (dolist (subdir (desirepath-directory-subdirs dir))
-      ;;  Convert forward and backward slashes.
-      (setq subdir
-	    (desirepath-expand-file-name subdir))
-      (unless (string-match desirepath--boot-ignore-directory-regexp subdir)
-	(desirepath-verbose-macro (or verbose 8)
-	  (message "Desirepath: add subdir %s" subdir))
-	(cl-pushnew subdir load-path :test 'string=)))))
+    (cond
+     ((stringp root)
+      (setq root (list root)))
+     ((listp root)
+      nil)
+     (t
+      (error "Incorrect ROOT parameter value: %s" root)))
+    (dolist (dir root)
+      (dolist (subdir (desirepath-directory-subdirs dir))
+	;;  Convert forward and backward slashes.
+	(setq subdir
+	      (desirepath-expand-file-name subdir))
+	(unless (string-match desirepath--boot-ignore-directory-regexp subdir)
+	  (desirepath-verbose-macro (or verbose 8)
+	    (message "Desirepath: add subdir %s" subdir))
+	  (cl-pushnew subdir load-path :test 'string=)))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-default-load-path-root-user ()
-  "Return user's Emacs Lisp path by guessing various directories."
-  (cl-flet ((msg (msg)
-		 (message msg)
-		 (unless desirepath--startup-no-messages
-		   (sit-for 2))
-		 nil))
-    (if (null (getenv "HOME"))
-	(msg "Desirepath: [ERROR] Environment variable HOME is not set.")
-      (let (ret)
-	(dolist (dir (list
-		      (if desirepath--xemacs-p
-			  "~/.xemacs.d")
-		      (if desirepath--xemacs-p
-			  "~/.xemacs")
-		      "~/.emacs.d" ;; New Emacs
-		      "~/elisp"
-		      "~/lisp"
-		      "~/.elisp"
-		      "~/.lisp"
-		      "~/.emacs"))
-	  (when (and (stringp dir)
-		     (file-directory-p dir))
-	    (setq ret dir)))
-	(unless ret
-	  ;;  Try to scan all of home for lisp. Hm, Ugh.
-	  ;;  Perhaps a user who starts Emacs for the first time, or
-	  ;;  a Windows, where HOME is not set.
-	  (desirepath-verbose-macro
-	      3
-	    (msg (format
-		  (concat "Desirepath: [WARN] Can't determine personal "
-			  "lisp package directory. $HOME/elisp was expected. "
-			  "This is probably harmless; "
-			  "see variable desirepath--load-path-root for more."
-			  "Environment variable HOME is [%]")
-		  (or (getenv "HOME")
-		      "<not set>")))))
-	ret))))
+  (defun desirepath-default-load-path-root-user ()
+    "Return user's Emacs Lisp path by guessing various directories."
+    (cl-flet ((msg (msg)
+		(message msg)
+		(unless desirepath--startup-no-messages
+		  (sit-for 2))
+		nil))
+      (if (null (getenv "HOME"))
+	  (msg "Desirepath: [ERROR] Environment variable HOME is not set.")
+	(let (ret)
+	  (dolist (dir (list
+			(if desirepath--xemacs-p
+			    "~/.xemacs.d")
+			(if desirepath--xemacs-p
+			    "~/.xemacs")
+			"~/.emacs.d" ;; New Emacs
+			"~/elisp"
+			"~/lisp"
+			"~/.elisp"
+			"~/.lisp"
+			"~/.emacs"))
+	    (when (and (stringp dir)
+		       (file-directory-p dir))
+	      (setq ret dir)))
+	  (unless ret
+	    ;;  Try to scan all of home for lisp. Hm, Ugh.
+	    ;;  Perhaps a user who starts Emacs for the first time, or
+	    ;;  a Windows, where HOME is not set.
+	    (desirepath-verbose-macro
+		3
+	      (msg (format
+		    (concat "Desirepath: [WARN] Can't determine personal "
+			    "lisp package directory. $HOME/elisp was expected. "
+			    "This is probably harmless; "
+			    "see variable desirepath--load-path-root for more."
+			    "Environment variable HOME is [%]")
+		    (or (getenv "HOME")
+			"<not set>")))))
+	  ret))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-default-load-path-root-dirs ()
-  "Find default directories for `desirepath--load-path-root'."
-  (let (list)
-    (dolist (dir
-	     (list
-	      (desirepath-default-load-path-root-user)
+  (defun desirepath-default-load-path-root-dirs ()
+    "Find default directories for `desirepath--load-path-root'."
+    (let (list)
+      (dolist (dir
+	       (list
+		(desirepath-default-load-path-root-user)
 
-	      ;;  site wide configuration
-	      ;;  #todo: where is XEmacs installed by default?
-	      (if (not desirepath--xemacs-p)
-		  (concat
-		   "/usr/local/share/emacs/"
-		   (if (string-match "[0-9]+\\.[0-9]+" emacs-version)
-		       (match-string 0 emacs-version)
-		     "")
-		   "/lisp"))
-	      ;; Cygwin
-	      "/var/share/site-lisp"
-	      ;; Debian
-	      "/usr/local/lib/emacs/site-lisp"
-	      "/usr/local/share/emacs/site-lisp"
-	      "/usr/local/share/site-lisp"
-	      "/opt/share/site-lisp"
-	      "/opt/local/share/site-lisp"
-	      "/opt/local/share/emacs/site-lisp"))
-      (when (stringp dir)
-	(message "Desirepath: default desirepath--load-path-root => %s %s"
-		 dir
-		 (if (file-directory-p dir)
-		     "OK"
-		   "NOT EXIST"))
-	(if (file-directory-p dir)
-	    (push dir list))))
-    list))
+		;;  site wide configuration
+		;;  #todo: where is XEmacs installed by default?
+		(if (not desirepath--xemacs-p)
+		    (concat
+		     "/usr/local/share/emacs/"
+		     (if (string-match "[0-9]+\\.[0-9]+" emacs-version)
+			 (match-string 0 emacs-version)
+		       "")
+		     "/lisp"))
+		;; Cygwin
+		"/var/share/site-lisp"
+		;; Debian
+		"/usr/local/lib/emacs/site-lisp"
+		"/usr/local/share/emacs/site-lisp"
+		"/usr/local/share/site-lisp"
+		"/opt/share/site-lisp"
+		"/opt/local/share/site-lisp"
+		"/opt/local/share/emacs/site-lisp"))
+	(when (stringp dir)
+	  (message "Desirepath: default desirepath--load-path-root => %s %s"
+		   dir
+		   (if (file-directory-p dir)
+		       "OK"
+		     "NOT EXIST"))
+	  (if (file-directory-p dir)
+	      (push dir list))))
+      list))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun  desirepath-directory-search (dir list &optional verb bug)
-  "Search DIR in the hierarchy of directories upward.
+  (defun  desirepath-directory-search (dir list &optional verb bug)
+    "Search DIR in the hierarchy of directories upward.
 
 Input:
 
@@ -2026,59 +2043,59 @@ Input:
 
   VERB     Verbose messages.
   BUG      If set, and DIR not found, call `desirepath-message-bug'."
-  (let (found)
-    (cl-flet ((check-dir
-	       (try dir)
-	       (setq try (desirepath-expand-file-name
-			  (concat (file-name-as-directory try)
-				  dir)))
-	       (if verb
-		   (message "Desirepath: directory search ... %s" try))
-	       (when (file-directory-p try)
-		 (if verb
-		     (message "Desirepath: directory search ... found %s" try))
-		 try)))
-      (or dir
-	  (setq dir ""))
-      (cl-dolist (try list)
-	(cond
-	 ((stringp try)
-	  (if (setq found (check-dir try dir))
-	      (cl-return)))
-	 ((listp try)
-	  (cl-multiple-value-bind (path count) try
-	    (cond
-	     ((and (stringp path)
-		   (eq count 'abs))
-	      (if (setq found (check-dir path dir))
-		  (cl-return)))
-	     ((and (stringp path)
-		   (integerp count))
-	      (while (and (stringp path)
-			  (not (zerop count))
-			  (> count 0))
+    (let (found)
+      (cl-flet ((check-dir
+		  (try dir)
+		  (setq try (desirepath-expand-file-name
+			     (concat (file-name-as-directory try)
+				     dir)))
+		  (if verb
+		      (message "Desirepath: directory search ... %s" try))
+		  (when (file-directory-p try)
+		    (if verb
+			(message "Desirepath: directory search ... found %s" try))
+		    try)))
+	(or dir
+	    (setq dir ""))
+	(cl-dolist (try list)
+	  (cond
+	   ((stringp try)
+	    (if (setq found (check-dir try dir))
+		(cl-return)))
+	   ((listp try)
+	    (cl-multiple-value-bind (path count) try
+	      (cond
+	       ((and (stringp path)
+		     (eq count 'abs))
 		(if (setq found (check-dir path dir))
-		    (cl-return))
-		(cl-decf count)
-		(setq path
-		      (desirepath-directory-up path)))))))))
+		    (cl-return)))
+	       ((and (stringp path)
+		     (integerp count))
+		(while (and (stringp path)
+			    (not (zerop count))
+			    (> count 0))
+		  (if (setq found (check-dir path dir))
+		      (cl-return))
+		  (cl-decf count)
+		  (setq path
+			(desirepath-directory-up path)))))))))
 
-      (cond
-       (found ;;#todo: anything to do here?
-	t)
-       (t
-	;;  Hope people that have it in non-standard locations
-	;;  will tell it to maintainer.
-	(when (and verb bug)
-	  (message "Desirepath: [WARNING] %s not found." dir)
-	  (desirepath-message-bug
-	   (format "Directory lookup fail %s" dir)))))
-      found)))
+	(cond
+	 (found ;;#todo: anything to do here?
+	  t)
+	 (t
+	  ;;  Hope people that have it in non-standard locations
+	  ;;  will tell it to maintainer.
+	  (when (and verb bug)
+	    (message "Desirepath: [WARNING] %s not found." dir)
+	    (desirepath-message-bug
+	     (format "Directory lookup fail %s" dir)))))
+	found)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-load-path-initial-value-xemacs (root &optional force)
-  "Add XEmacs installation lisp directories to `load-path'.
+  (defun desirepath-load-path-initial-value-xemacs (root &optional force)
+    "Add XEmacs installation lisp directories to `load-path'.
 
 Input:
 
@@ -2090,155 +2107,164 @@ Input:
 	    adds all found directories to `load-path'. No duplicates
 	    are added though. This option is able to fix broken
 	    `load-path'."
-  ;;  Latest XEmacs does not include all of its packages in the
-  ;;  standard installation, but in a huge archive called "SUMO", which
-  ;;  contains subdirectory "xemacs-packages".
-  ;;
-  ;;  We have no way of knowing where that directory has been unpacked, but
-  ;;  try few guesses anyway.
-  (when (and desirepath--xemacs-p
-	     (boundp 'emacs-major-version)
-	     ;;  The `symbol-value' is just a byte compiler silencer
-	     ;;  after the above `boundp' test.
-	     (> (symbol-value 'emacs-major-version) 20)
-	     (or force
-		 (null (desirepath-load-path-string-match
-			"xemacs-packages"))))
-    (message "Desirepath: load-path auto-boot [XEmacs] ...")
-    (let (found
-	  xemacs-packages)
-      ;;  Search under standard location
-      ;;  <XEmacs-root>/xemacs-packages  or
-      ;;  XEmacs/XEmacs-21.2/xemacs-packages
-      (dolist (lisp '("xemacs-packages"
-		      "mule-packages"
-		      "site-packages"))
-	(setq lisp (concat lisp "/lisp"))
-	(when (setq found
-		    (desirepath-directory-search
-		     lisp
-		     (list (list root 3))
-		     'verb
-		     'bug))
-	  (if (string= lisp "xemacs-packages/lisp")
-	      (setq xemacs-packages found))
-	  (desirepath-load-path-add-subdirs found)))
-      ;; Still not found? Try few more alternatives. This time
-      ;; we only try to find the "xemacs-packages"
-      (unless xemacs-packages
-	(when (setq found
-		    (desirepath-directory-search
-		     "xemacs-packages/lisp"
-		     (list
-		      ;;  The first is historical location
-		      ;;  of a vanilla-configured XEmacs
-		      '("/usr/local/lib/xemacs" abs)
-		      ;;  Try more guesses
-		      '("/usr/share/lib/xemacs" abs)
-		      '("/usr/lib/xemacs" abs)
-		      '("~/.xemacs-packages/lisp" abs)
-		      '("~/.xemacs")
-		      '("~" abs)
-		      '("~/site-lisp" abs)
-		      '("~/lisp")
-		      '("~/elisp"))
-		     'verb
-		     'bug))
-	  (desirepath-load-path-add-subdirs found)))
-      (message "Desirepath: load-path auto-boot [XEmacs]... done."))))
+    ;;  Latest XEmacs does not include all of its packages in the
+    ;;  standard installation, but in a huge archive called "SUMO", which
+    ;;  contains subdirectory "xemacs-packages".
+    ;;
+    ;;  We have no way of knowing where that directory has been unpacked, but
+    ;;  try few guesses anyway.
+    (when (and desirepath--xemacs-p
+	       (boundp 'emacs-major-version)
+	       ;;  The `symbol-value' is just a byte compiler silencer
+	       ;;  after the above `boundp' test.
+	       (> (symbol-value 'emacs-major-version) 20)
+	       (or force
+		   (null (desirepath-load-path-string-match
+			  "xemacs-packages"))))
+      (message "Desirepath: load-path auto-boot [XEmacs] ...")
+      (let (found
+	    xemacs-packages)
+	;;  Search under standard location
+	;;  <XEmacs-root>/xemacs-packages  or
+	;;  XEmacs/XEmacs-21.2/xemacs-packages
+	(dolist (lisp '("xemacs-packages"
+			"mule-packages"
+			"site-packages"))
+	  (setq lisp (concat lisp "/lisp"))
+	  (when (setq found
+		      (desirepath-directory-search
+		       lisp
+		       (list (list root 3))
+		       'verb
+		       'bug))
+	    (if (string= lisp "xemacs-packages/lisp")
+		(setq xemacs-packages found))
+	    (desirepath-load-path-add-subdirs found)))
+	;; Still not found? Try few more alternatives. This time
+	;; we only try to find the "xemacs-packages"
+	(unless xemacs-packages
+	  (when (setq found
+		      (desirepath-directory-search
+		       "xemacs-packages/lisp"
+		       (list
+			;;  The first is historical location
+			;;  of a vanilla-configured XEmacs
+			'("/usr/local/lib/xemacs" abs)
+			;;  Try more guesses
+			'("/usr/share/lib/xemacs" abs)
+			'("/usr/lib/xemacs" abs)
+			'("~/.xemacs-packages/lisp" abs)
+			'("~/.xemacs")
+			'("~" abs)
+			'("~/site-lisp" abs)
+			'("~/lisp")
+			'("~/elisp"))
+		       'verb
+		       'bug))
+	    (desirepath-load-path-add-subdirs found)))
+	(message "Desirepath: load-path auto-boot [XEmacs]... done."))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-load-path-initial-value (&optional dir-list)
-  "Add Emacs installation lisp directories to `load-path'.
-This is solely used for booting up desirepath.el package, so that
-`require' commands can be satisfied. Without the core packages available
-in `load-path' it is not possible to use Emacs.
+  (defun desirepath-load-path-initial-value (&optional dir-list)
+    "Add Emacs installation lisp directories to `load-path'.
+This is the bootstrap step called by `desirepath' when the load-path
+cache is missing or expired.  It ensures that `require' and `load'
+commands can find core Emacs lisp files (in particular `term/',
+`leim/' and other subdirectories that older Emacsen did not put on
+`load-path' by default) before the cache is rebuilt.
 
-The DIR-LIST is location of additional directories to consider as
-Emacs core-lisp installation directories."
-  (let* ((root-base (desirepath-emacs-root-directory))
-	 (dir-p     (and root-base
-			 (file-directory-p root-base)))
-	 root)
-    (message "Desirepath: load-path auto-boot (Emacs install dir)... %s %s"
-	     (if root-base
-		 root-base
-	       "[can't find Emacs install root]")
-	     (if dir-p
-		 "(dir nok)"
-	       "(dir ok)"))
-    (when (and root-base
-	       dir-p)
-      ;;  Why this booting is even needed? Isn't `load-path' already
-      ;;  set, when Emacs starts? Not quite. Emacs does not include term/
-      ;;  directory in `load-path', because it has peculiar way of
-      ;;  requiring (load "term/vt100"). This boot section will ensure
-      ;;  that all paths are included in `load-path'.
-      ;;
-      (message "Desirepath: load-path auto-boot [running]")
-      (setq root-base (file-name-as-directory root-base))
-      ;;
-      ;;  Make ROOT/lisp directory. This is the same for all
-      ;;  Emacs versions. Win32 conversion to lowercase
-      ;;
-      (setq root (desirepath-expand-file-name (concat root-base "lisp")))
-      ;;
-      ;; This is just ultimate safeguard. We did find the
-      ;; root, but that doesn't mean it is included in the `load-path'
-      ;; E.g. there may be directories /ROOT/lisp/something
-      ;;
-      ;; It is still possible that member fails, because
-      ;;
-      ;; - Win32 can have mixed case paths, C:/ and c:/ are
-      ;;   different to pushnew
-      ;; - Win32 slashes c:\ c:/ confuse pushnew.
-      ;;
-      ;; These will be handled in the final install phase,
-      ;; see function `desirepath-load-path-clean'
-      ;;
-      (unless (or (member root load-path)
-		  (member (file-name-as-directory root) load-path))
-	(cl-pushnew root load-path :test 'string=)
-	(message "Desirepath: load-path auto-boot [%s added]." root))
-      ;;
-      ;;  We might have included this line inside the above `unless',
-      ;;  after `pushnew' but we do not do that. It's not a guarantee
-      ;;  that subdirectories are there if ROOT was there.
-      ;;
-      (message "Desirepath: booting standard Emacs lisp paths.")
-      (desirepath-load-path-add-subdirs root 2)
-      (desirepath-load-path-initial-value-xemacs root-base)
-      ;;  Add user supplied additional paths.
-      (when dir-list
-	(message "Desirepath: booting user supplied lisp paths.")
-	(desirepath-load-path-add-subdirs dir-list))
-      (message "Desirepath: load-path auto-boot... done"))))
+The bootstrap is idempotent: `cl-pushnew ... :test \\='string=' and
+`desirepath-load-path-add-subdirs' skip directories that are already
+on `load-path'.  It is safe to call multiple times.
+
+DIR-LIST, when non-nil, is an extra list of directories to treat as
+Emacs core-lisp installation roots (e.g. \\='/usr/share/emacs/31.1\\=').
+When nil, the root is inferred from `invocation-directory' or from
+the current `load-path' by `desirepath-emacs-root-directory'."
+    (let* ((root-base (desirepath-emacs-root-directory))
+	   (dir-p     (and root-base
+			   (file-directory-p root-base)))
+	   root)
+      (message "Desirepath: load-path auto-boot (Emacs install dir)... %s %s"
+	       (if root-base
+		   root-base
+		 "[can't find Emacs install root]")
+	       (if dir-p
+		   "(dir nok)"
+		 "(dir ok)"))
+      (when (and root-base
+		 dir-p)
+	;;  Why this booting is even needed? Isn't `load-path' already
+	;;  set, when Emacs starts? Not quite. Emacs does not include term/
+	;;  directory in `load-path', because it has peculiar way of
+	;;  requiring (load "term/vt100"). This boot section will ensure
+	;;  that all paths are included in `load-path'.
+	;;
+	(message "Desirepath: load-path auto-boot [running]")
+	(setq root-base (file-name-as-directory root-base))
+	;;
+	;;  Make ROOT/lisp directory. This is the same for all
+	;;  Emacs versions. Win32 conversion to lowercase
+	;;
+	(setq root (desirepath-expand-file-name (concat root-base "lisp")))
+	;;
+	;; This is just ultimate safeguard. We did find the
+	;; root, but that doesn't mean it is included in the `load-path'
+	;; E.g. there may be directories /ROOT/lisp/something
+	;;
+	;; It is still possible that member fails, because
+	;;
+	;; - Win32 can have mixed case paths, C:/ and c:/ are
+	;;   different to pushnew
+	;; - Win32 slashes c:\ c:/ confuse pushnew.
+	;;
+	;; These will be handled in the final install phase,
+	;; see function `desirepath-load-path-clean'
+	;;
+	(unless (or (member root load-path)
+		    (member (file-name-as-directory root) load-path))
+	  (cl-pushnew root load-path :test 'string=)
+	  (message "Desirepath: load-path auto-boot [%s added]." root))
+	;;
+	;;  We might have included this line inside the above `unless',
+	;;  after `pushnew' but we do not do that. It's not a guarantee
+	;;  that subdirectories are there if ROOT was there.
+	;;
+	(message "Desirepath: booting standard Emacs lisp paths.")
+	(desirepath-load-path-add-subdirs root 2)
+	(desirepath-load-path-initial-value-xemacs root-base)
+	;;  Add user supplied additional paths.
+	(when dir-list
+	  (message "Desirepath: booting user supplied lisp paths.")
+	  (desirepath-load-path-add-subdirs dir-list))
+	(message "Desirepath: load-path auto-boot... done"))))
+
+;;; ----------------------------------------------------------------------
+
+  (defun desirepath-tmp-find-root-home ()
+    "Return suitable root user HOME directory. /home/root etc."
+    (let (ret)
+      (cl-dolist (path (list
+			(if (and (not desirepath--win32-p)
+				 (eq (user-uid) 0))
+			    (getenv "HOME"))
+			"/home/root"
+			"/users/root"
+			"/root"
+			"/"))
+	(when (and (stringp path)
+		   (file-directory-p path))
+	  (desirepath-verbose-macro 5
+	    (message "Desirepath: desirepath-tmp-find-root-home [%s]" path))
+	  (setq ret path)
+	  (cl-return)))
+      ret))
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-tmp-find-root-home ()
-  "Return suitable root user HOME directory. /home/root etc."
-  (let (ret)
-    (cl-dolist (path (list
-		   (if (and (not desirepath--win32-p)
-			    (eq (user-uid) 0))
-		       (getenv "HOME"))
-		   "/home/root"
-		   "/users/root"
-		   "/root"
-		   "/"))
-      (when (and (stringp path)
-		 (file-directory-p path))
-	(message "Desirepath: desirepath-tmp-find-root-home [%s]" path)
-	(setq ret path)
-	(cl-return)))
-    ret))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-tmp-find-writable-dir (&optional file)
-  "Find writable directory and append FILE to it. Only used at startup.
+  (defun desirepath-tmp-find-writable-dir (&optional file)
+    "Find writable directory and append FILE to it. Only used at startup.
 This function sets initial values for variable
 `desirepath--cache-file-prefix'.
 
@@ -2248,72 +2274,73 @@ References:
 
   `desirepath--cache-file-prefix'
   `desirepath--load-path-dump-file'"
-  (let ((root-home   (desirepath-tmp-find-root-home))
-	(root-user-p (and (not desirepath--win32-p)
-			  (eq (user-uid) 0)))
-	(user        (or (getenv "USER")
-			 (getenv "LOGNAME")
-			 (let ((sym 'user-login-name))
-			   (if (boundp sym) ;; Not in XEmacs 21.4
-			       (symbol-value sym)))
-			 (let ((home (expand-file-name "~")))
-			   (if (string-match "\\([^/\\]+\\)$" home)
-			       (match-string 1 home)))
-			 ""))
-	ret)
-    (when (and (not (file-directory-p "~/tmp"))
-	       (not (file-directory-p "c:/"))) ;; Non-Win32 system
-      (message "Desirepath: [WARNING] Cannot find $HOME/tmp directory."))
-    (cl-dolist (dir '("~/.emacs.d/config/"
-		   "~/elisp/config/"
-		   "~/elisp/conf/"
-		   "~/lisp/config/"
-		   "~/lisp/conf/"
-		   "~/.xemacs/config/"
-		   "~/tmp/"
-		   "~"
-		   "/tmp/"
-		   "/var/tmp/"
-		   "c:/temp/"
-		   "c:/tmp/"
-		   "c:/"))
-      ;; The ROOT user is special case. (expand-file-name "~")
-      ;; may return plain "/".
-      ;; check if SysAdm has created
-      ;; /home/root, /users/root etc. directory.
-      (cond
-       ((and root-user-p
-	     (string-match "~" dir))
-	(setq dir
-	      (if (string= root-home "/")
-		  ;; ~  =>  ""
-		  (replace-match "" nil nil dir)
-		;; ~/tmp =>  /home/root/tmp
-		(replace-match root-home nil nil dir))))
-       (t
-	(setq dir (file-name-as-directory
-		   (expand-file-name dir)))))
-      (when (and (file-directory-p dir)
-		 (file-writable-p
-		  (concat dir
-			  (or file "###desirepath.el-test###"))))
-	;; In multi-user environment, we must say /tmp/-USER-file
-	(when (string= dir "/tmp/")
-	  (setq dir (concat dir "-" user "-" )))
-	(setq ret (concat dir (or file "")))
-	(cl-return)))
-    ;;  Last thing to do. If User has set his HOME to point to
-    ;;  C:/, that is not a good idea. Move cache file under C:/TEMP
-    (when (and (string-match "^[Cc]:[/\\]?$" ret)
-	       (file-directory-p "C:/temp"))
-      (message
-       "Desirepath: [WARNING] find-writable-dir Using c:/temp instead of c:/")
-      (setq ret "c:/temp"))
-    (if ret
-	ret
-      (error "Desirepath: Can't find writable directory for %s" file))))
+    (let ((root-home   (desirepath-tmp-find-root-home))
+	  (root-user-p (and (not desirepath--win32-p)
+			    (eq (user-uid) 0)))
+	  (user        (or (getenv "USER")
+			   (getenv "LOGNAME")
+			   (let ((sym 'user-login-name))
+			     (if (boundp sym) ;; Not in XEmacs 21.4
+				 (symbol-value sym)))
+			   (let ((home (expand-file-name "~")))
+			     (if (string-match "\\([^/\\]+\\)$" home)
+				 (match-string 1 home)))
+			   ""))
+	  ret)
+      (when (and (not (file-directory-p "~/tmp"))
+		 (not (file-directory-p "c:/"))) ;; Non-Win32 system
+	(desirepath-verbose-macro 3
+	  (message "Desirepath: [INFO] $HOME/tmp not found (using fallback)")))
+      (cl-dolist (dir '("~/.emacs.d/config/"
+			"~/elisp/config/"
+			"~/elisp/conf/"
+			"~/lisp/config/"
+			"~/lisp/conf/"
+			"~/.xemacs/config/"
+			"~/tmp/"
+			"~"
+			"/tmp/"
+			"/var/tmp/"
+			"c:/temp/"
+			"c:/tmp/"
+			"c:/"))
+	;; The ROOT user is special case. (expand-file-name "~")
+	;; may return plain "/".
+	;; check if SysAdm has created
+	;; /home/root, /users/root etc. directory.
+	(cond
+	 ((and root-user-p
+	       (string-match "~" dir))
+	  (setq dir
+		(if (string= root-home "/")
+		    ;; ~  =>  ""
+		    (replace-match "" nil nil dir)
+		  ;; ~/tmp =>  /home/root/tmp
+		  (replace-match root-home nil nil dir))))
+	 (t
+	  (setq dir (file-name-as-directory
+		     (expand-file-name dir)))))
+	(when (and (file-directory-p dir)
+		   (file-writable-p
+		    (concat dir
+			    (or file "###desirepath.el-test###"))))
+	  ;; In multi-user environment, we must say /tmp/-USER-file
+	  (when (string= dir "/tmp/")
+	    (setq dir (concat dir "-" user "-" )))
+	  (setq ret (concat dir (or file "")))
+	  (cl-return)))
+      ;;  Last thing to do. If User has set his HOME to point to
+      ;;  C:/, that is not a good idea. Move cache file under C:/TEMP
+      (when (and (string-match "^[Cc]:[/\\]?$" ret)
+		 (file-directory-p "C:/temp"))
+	(message
+	 "Desirepath: [WARNING] find-writable-dir Using c:/temp instead of c:/")
+	(setq ret "c:/temp"))
+      (if ret
+	  ret
+	(error "Desirepath: Can't find writable directory for %s" file))))
 
-) ;; --++-- --++-- --++-- --++-- --++-- --++-- -- eval-and-compile-end +--
+  ) ;; --++-- --++-- --++-- --++-- --++-- --++-- -- eval-and-compile-end +--
 
 ;;}}}
 ;;{{{ variables
@@ -2403,43 +2430,78 @@ Which package loads?
 		 (const t))
   :group 'Desirepath)
 
+(defcustom desirepath--cache-enabled t
+  "Whether `desirepath' uses its `load-path' cache at all.
+When nil, `desirepath' scans the filesystem on every startup instead
+of loading a cache from disk, and advice on `load', `require',
+`locate-library', etc. is not installed.  Startup is noticeably
+slower, but no stale cache can interfere.
+
+In a healthy setup leave this at the default t.  Set it to nil only
+when the cache has become corrupted, or for debugging."
+  :type 'boolean
+  :group 'Desirepath)
+
 (defcustom desirepath--compression-support nil
-  "*Type of compression support: 'default, 'all or 'none.
-
-'default
-
-    Files ending to .gz and .bz2 files are counted in when
-    a load command is issued.
-
-'all
-
-    In addition to 'default, also autoloaded functions can be found from
-    compressed files. This means that statements like these will work:
-
-    (autoload 'jka-compr \"jka-compr\")
-
-    The recommendation is that you set this value to 'all if you keep your lisp
-    files in compressed format to save space.
+  "*Type of compression support for `load'/`require'/`autoload'.
 
 nil
+    No compression.  Search only .el and .elc files.  Recommended if
+    you keep no compressed Lisp files: no extra suffixes are tried,
+    lookup is noticeably faster.  `desirepath--compressed-file-extensions'
+    is effectively ignored.
 
-    Do not use compression support. Seach only .el and .elc files.
-    This is the recommended setting in case there is no need for
-    compressed files. It will speed searching considerably.
+`default'
+    In addition to .el/.elc, files ending in .gz and .bz2 are
+    considered when `load' or `require' is called.  `jka-compr' is
+    loaded automatically on demand, so `(load \"my-file\")' transparently
+    finds `my-file.el.gz' or `my-file.el.bz2' if present.  Compressed
+    files are also included in `desirepath--cache'.
 
-    Variable `desirepath--compressed-file-extensions' is not used.
+`all'
+    In addition to `default', autoloaded functions can be resolved
+    from compressed files, so `;;;###autoload' cookies in .el.gz files
+    work.  Recommended if you keep Lisp sources compressed to save
+    space.
 
-'none
+This value must be set once, before `desirepath' is loaded.  Changing
+it afterwards has no effect on already-built caches; call
+`desirepath-cache-regenerate' to rebuild.
 
-    Do not use cache at all. Use this if the cache is broken. In Total
-    emergency, call M-x -1 `desirepath-cache-mode' to disable all advises.
+The deprecated value `none' is accepted for backward compatibility
+and is translated to `desirepath--cache-enabled' = nil (see below).
 
-This value must be set once, before package is loaded. Changing it afterwards
-has no effect."
-  :type '(choice (const default)
-		 (const all)
-		 (const none))
+To disable the cache entirely, set `desirepath--cache-enabled' to nil."
+  :type '(choice (const :tag "No compression" nil)
+                 (const :tag "Compression for load/require" default)
+                 (const :tag "Also autoload from compressed files" all)
+                 (const :tag "Deprecated (use desirepath--cache-enabled)" none))
   :group 'Desirepath)
+
+;; Migration: `'none' used to mean \"do not use cache at all\".
+;; Translate it to the new dedicated flag and warn once.
+(when (eq desirepath--compression-support 'none)
+  (display-warning
+   'desirepath
+   "`desirepath--compression-support' = 'none is deprecated.
+It now means \"disable cache\"; set `desirepath--cache-enabled' = nil
+instead.  Auto-translating for this session."
+   :warning)
+  (setq desirepath--cache-enabled nil)
+  (setq desirepath--compression-support nil))
+
+
+;; Migration: `'none' used to mean \"do not use cache at all\".
+;; Translate it to the new dedicated flag and warn.
+(when (eq desirepath--compression-support 'none)
+  (display-warning
+   'desirepath
+   "`desirepath--compression-support' = 'none is deprecated.
+It now means \"disable cache\"; set `desirepath--cache-enabled' = nil
+instead.  Auto-translating for this session."
+   :warning)
+  (setq desirepath--cache-enabled nil)
+  (setq desirepath--compression-support nil))
 
 (when (and (boundp 'command-line-args)
 	   (member "-debug-init" (symbol-value 'command-line-args)))
@@ -2449,11 +2511,18 @@ has no effect."
 
 (defcustom desirepath--cache-expiry-days
   (desirepath-set-default-value-macro
-   "desirepath--cache-expiry-days"
-   14)
-  "*How many days until expiring `load-path' cache and rescan paths.
-If set to nil; do not use cache feature, but scan directories at startup."
-  :type 'integer
+      "desirepath--cache-expiry-days"
+    14)
+  "*How many days until the `load-path' cache expires and is rebuilt.
+If nil, the cache is loaded on every startup and never expires
+automatically; call \\[desirepath-cache-regenerate] to force a refresh.
+If a positive integer, the cache is loaded as long as it is younger
+than that many days; older caches are rebuilt.
+
+To disable the cache entirely (never load, always scan), set
+`desirepath--cache-enabled' to nil instead."
+  :type '(choice (const :tag "Never expire" nil)
+                 (integer :tag "Days until expiry"))
   :group 'Desirepath)
 
 (defcustom desirepath--report-mode-name "DesirepathReport"
@@ -2463,8 +2532,8 @@ If set to nil; do not use cache feature, but scan directories at startup."
 
 (defcustom desirepath--verbose
   (desirepath-set-default-value-macro
-   "desirepath--verbose"
-   3)
+      "desirepath--verbose"
+    1)
   "*If number, bigger than zero, let user know what's happening.
 In error situations you can look old messages from *Messages* buffer.
 If you want all messages, set value to 10.
@@ -2476,12 +2545,12 @@ everything to `desirepath--log-file'."
 
 (defcustom desirepath--verbose-timing
   (desirepath-set-default-value-macro
-   "desirepath--verbose-timing"
-   nil)
+      "desirepath--verbose-timing"
+    nil)
   "*If non-nil, dispaly laod time of each `load' `load-library' `require' call.
 This variable is obsolete and not used."
-    :type  'integer
-    :group 'Desirepath)
+  :type  'integer
+  :group 'Desirepath)
 
 (eval-and-compile
 
@@ -2538,8 +2607,9 @@ fixed and added to `Info-default-directory-list'."
     :type '(list directory)
     :group 'Desirepath)) ;; eval-and-compile end
 
-(message "Desirepath: [VAR] desirepath--Info-default-directory-list %s"
-	 (prin1-to-string desirepath--Info-default-directory-list))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--Info-default-directory-list %s"
+	   (prin1-to-string desirepath--Info-default-directory-list)))
 
 ;;  We can't use `ti::package-config-file-prefix' NOW, because the tinylibm.el
 ;;  is not yet loaded - `load-path' is not yet know for sure.
@@ -2552,7 +2622,7 @@ fixed and added to `Info-default-directory-list'."
    nil
    (cond
     (desirepath--win32-cygwin-p
-    ;;  We know that Cygwin contains programs for these
+     ;;  We know that Cygwin contains programs for these
      '(".gz" ".bz2"))
     (t
      (list
@@ -2573,8 +2643,9 @@ References:
   :type  '(list  string)
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--compressed-file-extensions %s"
-	 (prin1-to-string desirepath--compressed-file-extensions))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--compressed-file-extensions %s"
+	   (prin1-to-string desirepath--compressed-file-extensions)))
 
 (defcustom desirepath--cache-file-prefix
   ;;
@@ -2582,8 +2653,8 @@ References:
   ;; is not loaded yet. USER MUST SETQ THIS VARIABLE
   ;;
   (desirepath-set-default-value-macro
-   "desirepath--cache-file-prefix"
-   (desirepath-tmp-find-writable-dir "emacs-config-desirepath-cache"))
+      "desirepath--cache-file-prefix"
+    (desirepath-tmp-find-writable-dir "emacs-config-desirepath-cache"))
   "*File where to store `desirepath--cache'. See `desirepath--cache-file-postfix'.
 This is only a prefix for filename. The whole filename is returned by
 function `desirepath-cache-file-name' which appends emacs version id after
@@ -2593,32 +2664,39 @@ An example:  /home/some/elisp/config/tinypah-cache-"
   :type  'string
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-prefix %s"
-	 (prin1-to-string desirepath--cache-file-prefix))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-prefix %s"
+	   (prin1-to-string desirepath--cache-file-prefix)))
 
-(defcustom desirepath--cache-file-hostname-function
-  'desirepath-cache-file-hostname
-  "*Function to return HOST for the cache file name.
+(defcustom desirepath--cache-file-hostname-function nil
+  "*Function to return HOST to embed in the cache file name, or nil.
 
-You're interested on this variable only if you're running several networked
-machines and 1) you always have same, ONE mounted $HOME directory 2) and
-each machine has its own run-files, like site-lisp.
+Default nil: the cache file name is
+``<prefix>-<type>-<version><postfix>``, e.g.
+``ecf-load-path-cache-emacs-31.1.elc``.  This is correct when
+`desirepath--cache-file-prefix' lives on local storage
+\(`$XDG_CACHE_HOME'/``~/.cache``), which is the case for almost all
+modern Emacs installations.
 
-Use value nil to disable using hostname in cache file name:
+Set to `desirepath-cache-file-hostname' only if `$HOME' (and hence
+the cache directory) is NFS-shared across hosts whose site-lisp trees
+differ:
 
-  (setq desirepath--cache-file-hostname-function nil)
+  (setq desirepath--cache-file-hostname-function
+        \\='desirepath-cache-file-hostname)
 
-To activate the hostname portion in cache name, set variable to like this:
-This makes each HOST have its own cache.
-
-  (setq desirepath--cache-file-hostname-function 'desirepath-cache-file-hostname)
+This makes each HOST have its own cache file, at the cost of
+rebuilding it independently on every machine.
 
 See manual \\[desirepath-version] for more information."
-  :type  'function
+  :type  '(choice
+           (const :tag "No hostname (local cache)" nil)
+           (function :tag "Function returning hostname"))
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-hostname-function %s"
-	 (prin1-to-string desirepath--cache-file-hostname-function))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-hostname-function %s"
+	   (prin1-to-string desirepath--cache-file-hostname-function)))
 
 ;;  We select the compressed file to save space if we can detect gzip
 ;;  in this environment.
@@ -2643,8 +2721,9 @@ Do not st this to \".elc.gz\", it's not supported."
   :type  'string
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--cache-file-postfix %s"
-	 (prin1-to-string desirepath--cache-file-postfix))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--cache-file-postfix %s"
+	   (prin1-to-string desirepath--cache-file-postfix)))
 
 (defcustom desirepath--load-path-dump-file
   ;;
@@ -2663,10 +2742,11 @@ Called from function `desirepath-cache-duplicate-report'."
   :type  'function
   :group 'Desirepath)
 
-(message
- "Desirepath: [VAR] desirepath--cache-duplicate-report-ignore-functions %s"
- (prin1-to-string
-  desirepath--cache-duplicate-report-ignore-functions))
+(desirepath-verbose-macro 5
+  (message
+   "Desirepath: [VAR] desirepath--cache-duplicate-report-ignore-functions %s"
+   (prin1-to-string
+    desirepath--cache-duplicate-report-ignore-functions)))
 
 (defcustom desirepath--ignore-file-regexp nil
   "*Prohibit loading lisp file if regexp matches absolute path.
@@ -2808,8 +2888,9 @@ See Manual for explanation: M-x desirepath-version and \"Gnus\".")
 
 (run-hooks 'desirepath--load-path-ignore-regexp-hook)
 
-(message "Desirepath: [VAR] desirepath--ignore-file-regexp %s"
-	 (prin1-to-string desirepath--ignore-file-regexp))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--ignore-file-regexp %s"
+	   (prin1-to-string desirepath--ignore-file-regexp)))
 
 (eval-and-compile ;;  Needed at boot-time.
   (defcustom desirepath--core-emacs-load-path-list nil
@@ -2840,13 +2921,14 @@ XEmacs:
     :type  'directory
     :group 'Desirepath))
 
-(message "Desirepath: [VAR] desirepath--core-emacs-load-path-list %s"
-	 (prin1-to-string desirepath--core-emacs-load-path-list))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--core-emacs-load-path-list %s"
+	   (prin1-to-string desirepath--core-emacs-load-path-list)))
 
 (defcustom desirepath--load-path-root
   (desirepath-set-default-value-macro
-   "desirepath--load-path-root"
-   (desirepath-default-load-path-root-dirs))
+      "desirepath--load-path-root"
+    (desirepath-default-load-path-root-dirs))
   "*List of root directories of Emacs lisp packages.
 Put list all lisp package installation roots here, like
 
@@ -2867,15 +2949,15 @@ element that is not a string and a valid directory is ignored."
 
 (defcustom desirepath--extra-path-root
   (desirepath-set-default-value-macro
-   "desirepath--extra-path-root"
-   (let ((path (desirepath-ti::win32-cygwin-p 'use-cache)))
-     (when path
-       (message
-	(concat "Desirepath: Cygwin root is %s."
-		" Consider adding all Cygwin INFO directories"
-		" to variable `Info-directory-list'.")
-	path))
-     nil))
+      "desirepath--extra-path-root"
+    (let ((path (desirepath-ti::win32-cygwin-p 'use-cache)))
+      (when path
+	(message
+	 (concat "Desirepath: Cygwin root is %s."
+		 " Consider adding all Cygwin INFO directories"
+		 " to variable `Info-directory-list'.")
+	 path))
+      nil))
   "*Win32 Cygwin installation root or other search directories.
 This variable contains list of directories.
 
@@ -2888,8 +2970,9 @@ for manual pages and info files."
   :type  '(list directory)
   :group 'Desirepath)
 
-(message "Desirepath: [VAR] desirepath--extra-path-root %s"
-	 (prin1-to-string desirepath--extra-path-root))
+(desirepath-verbose-macro 5
+  (message "Desirepath: [VAR] desirepath--extra-path-root %s"
+	   (prin1-to-string desirepath--extra-path-root)))
 
 ;;; ....................................................... &v-private ...
 
@@ -2915,10 +2998,6 @@ to change this.")
   "With `desirepath--verbose' set to 20, the message buffer
 is constantly written to disk. Prepare, everything will take oodles
 of time...")
-
-(defvar desirepath--external-data-structure nil
-  "Whole data structure from external tool. See `desirepath-external-setup'.
-Do not touch. This is highly important for debugging purposes.")
 
 (defvar desirepath--extra-manpath nil
   "Additional paths found. See `desirepath--extra-path-root'.")
@@ -2989,11 +3068,6 @@ Use function `desirepath-cache-mode' which modifies everything needed.")
     0 'font-lock-comment-face t))
   "*Font lock keywords for the `desirepath--report-buffer' buffer.")
 
-(defvar desirepath--external-util-bin "emacs-util.pl"
-  "*External utility to help finding Emacs boot up information.
-DO NOR CHANGE THE NAME OF THE BINARY unless you rename the utility.
-See M-x desirepath-version (the manual) for more information.")
-
 ;;}}}
 ;;{{{ Macros
 
@@ -3031,19 +3105,19 @@ See M-x desirepath-version (the manual) for more information.")
 ;;; ----------------------------------------------------------------------
 ;;;
 (defmacro desirepath-Info-default-directory-list ()
-  "Emacs and XEmacs compatibility."
-  ;; Latest XEmacs does not use `Info-default-directory-list'
-  (if desirepath--xemacs-p
-      (intern "Info-directory-list")
-    (intern "Info-default-directory-list")))
+  "Return the Info directory list variable for this Emacs.
+`Info-default-directory-list' is obsolete since Emacs 23.2 and removed
+in Emacs 29+; `Info-directory-list' is the correct variable.  The
+actual value is populated by `desirepath--info-ensure-initialized',
+which is called once from `desirepath-install'."
+  'Info-directory-list)
+
 
 ;;; ----------------------------------------------------------------------
 ;;;
 (defmacro desirepath-Info-default-directory-list-sym ()
-  "Emacs and XEmacs compatibility."
-  `(if desirepath--xemacs-p
-       (intern "Info-directory-list")
-     (intern "Info-default-directory-list")))
+  "Return the Info directory list variable for this Emacs."
+  `(intern "Info-directory-list"))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -3093,6 +3167,27 @@ VAR is set to following values when ARG is:
 
 ;;}}}
 ;;{{{ Duplicated functions
+;;; Functions in this section are adapted from Jari Aalto's tinylib.
+;;; Not all of them are still used; the ones that are listed below.
+;;;
+;;; Alive (2026-11):
+;;;   desirepath-ti::date-time-difference     – desirepath-install timing
+;;;   desirepath-ti::bool-toggle              – desirepath-cache-mode
+;;;   desirepath-ti::funcall                  – compat-timer-cancel
+;;;   desirepath-ti::string-remove-whitespace – report-mode
+;;;   desirepath-ti::vc-version-lessp         – gnus version compare
+;;;   desirepath-ti::pp-variable-list         – write-file-variable-state
+;;;   desirepath-ti::write-file-variable-state– cache-file-write
+;;;   desirepath-ti::compat-timer-*           – install-timer (opt-in)
+;;;   desirepath-ti::directory-recursive-do   – extra-path-setup
+;;;   desirepath-ti::win32-cygwin-p           – extra-path-root default
+;;;   desirepath-ti::dired-buffer             – report-mode-dired
+;;;   desirepath-ti::window-single-p          – report-mode-dired
+;;;   desirepath-replace-regexp-in-string     – load-path-dump (Win32)
+;;;   desirepath-ti::replace-match            – replace-regexp-in-string
+;;;
+;;; Removed in P3 (2026-11):
+;;;   desirepath-ti::advice-control           – superseded by desirepath-advice-instantiate
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy: tinylib.el
@@ -3209,7 +3304,7 @@ Return:
 ;;; ----------------------------------------------------------------------
 ;;; #copy: from tinylibb.el
 (defun desirepath-replace-regexp-in-string
-  (regexp rep string &optional fixedcase literal subexp start)
+    (regexp rep string &optional fixedcase literal subexp start)
   (let ((i  0))
     (or subexp
 	(setq subexp 0))
@@ -3255,7 +3350,7 @@ Return:
 ;;; ----------------------------------------------------------------------
 ;;; #copy from tinylibm.el
 (defun desirepath-ti::write-file-variable-state
-  (file desc list &optional fast-save bup)
+    (file desc list &optional fast-save bup)
   "Save package state to FILE.
 
 Input:
@@ -3271,54 +3366,25 @@ Input:
 
   BUP       If non-nil, allow making backup. The default is no backup."
   (desirepath-with-temp-buffer
-   (let ((backup-inhibited (if bup nil t))
-	 ;;  prohibit Crypt++ from asking confirmation
-	 (crypt-auto-write-buffer  t))
-     (unless crypt-auto-write-buffer    ;Bytecomp silencer
-       (setq crypt-auto-write-buffer nil))
-     (insert ";; " file " -- " desc "\n"
-	     ";; Date: "
-	     (desirepath-time-string)
-	     "\n\n")
-     (if (not fast-save)
-	 (desirepath-ti::pp-variable-list list)
-       (dolist (var list)
-	 (insert (format "\n\n(defconst %s\n" (symbol-name var)))
-	 ;;  While `pp' would have nicely formatted the value, It's
-	 ;;  unbearable SLOW for 3000 file cache list.
-	 ;;  `prin1-to-string' is 10 times faster.
-	 (insert "'" (prin1-to-string (symbol-value var)) ")\n")))
-     (insert (format "\n\n;; end of %s\n" file))
-     (write-region (point-min) (point-max) file))))
-
-;;; ----------------------------------------------------------------------
-;;; #copy from tinylib.el
-(defun desirepath-ti::advice-control
-  (list regexp &optional disable verb msg)
-  "Enables/disable SINGLE-OR-LIST of advised functions that match REGEXP.
-Signals no errors, even if function in LIST is not advised.
-All advice classes ['any] are ena/disabled for REGEXP.
-
-Input:
-
-  LIST                  list of functions.
-  REGEXP                advice name regexp. Should normally have ^ anchor
-  DISABLE               flag, of non-nil then disable
-  VERB                  enable verbose messages
-  MSG                   display this message + on/off indication"
-  (dolist (func list)
-    (ignore-errors
-      (if disable
-	  (ad-disable-advice  func 'any regexp)
-	(ad-enable-advice     func 'any regexp))
-      (ad-activate func))) ;;change state
-  (if verb
-      (message
-       (concat
-	(or msg "advice(s): ")
-	(if disable
-	    "off"
-	  "on")))))
+    (let ((backup-inhibited (if bup nil t))
+	  ;;  prohibit Crypt++ from asking confirmation
+	  (crypt-auto-write-buffer  t))
+      (unless crypt-auto-write-buffer    ;Bytecomp silencer
+	(setq crypt-auto-write-buffer nil))
+      (insert ";; " file " -- " desc "\n"
+	      ";; Date: "
+	      (desirepath-time-string)
+	      "\n\n")
+      (if (not fast-save)
+	  (desirepath-ti::pp-variable-list list)
+	(dolist (var list)
+	  (insert (format "\n\n(defconst %s\n" (symbol-name var)))
+	  ;;  While `pp' would have nicely formatted the value, It's
+	  ;;  unbearable SLOW for 3000 file cache list.
+	  ;;  `prin1-to-string' is 10 times faster.
+	  (insert "'" (prin1-to-string (symbol-value var)) ")\n")))
+      (insert (format "\n\n;; end of %s\n" file))
+      (write-region (point-min) (point-max) file))))
 
 ;;; ----------------------------------------------------------------------
 ;;; #copy
@@ -3348,9 +3414,9 @@ Input
 		never than 2.1. In this case it is assumed
 		that zero based versions are latest development releases."
   (cl-flet ((version (str regexp)
-		     (if (string-match regexp str)
-			 (string-to-number (match-string 1 str))
-		       0)))
+	      (if (string-match regexp str)
+		  (string-to-number (match-string 1 str))
+		0)))
     (let* ((a1 (version a "^\\([0-9]+\\)"))
 	   (a2 (version a "^[0-9]+\\.\\([0-9]+\\)"))
 	   (a3 (version a "^[0-9]+\\.[0-9]+\\.\\([0-9]+\\)"))
@@ -3405,15 +3471,15 @@ Return:
 	item
 	ret)
     (cl-flet ((get-elt (elt place)
-		       (if (vectorp elt)
-			   (aref elt place)
-			 (nth place elt))))
+		(if (vectorp elt)
+		    (aref elt place)
+		  (nth place elt))))
       (cl-dolist (timer '(;; (("Mon Dec  9 10:01:47 1996-0" 10
-		       ;;     process nil))
-		       (timer-idle-list . 5)
-		       (timer-alist . 2)
-		       (timer-list  . 2) ;; 19.34+
-		       (itimer-list . 3)))
+			  ;;     process nil))
+			  (timer-idle-list . 5)
+			  (timer-alist . 2)
+			  (timer-list  . 2) ;; 19.34+
+			  (itimer-list . 3)))
 	(when (boundp (car timer))
 	  (setq list (symbol-value (car timer))
 		pos  (cdr timer))
@@ -3501,33 +3567,33 @@ Return:
     (cond
      (desirepath--xemacs-p
       (define-key desirepath-report-mode-map [(control shift button1)]
-	'desirepath-report-mode-delete-file))
+		  'desirepath-report-mode-delete-file))
      (t
       (define-key desirepath-report-mode-map [C-S-mouse-1]
-	'desirepath-report-mode-delete-file)))
+		  'desirepath-report-mode-delete-file)))
     ;; ............................................. users with no mouse ...
     (define-key desirepath-report-mode-map "\C-d"
-      'desirepath-report-mode-delete-file)
+		'desirepath-report-mode-delete-file)
     (define-key desirepath-report-mode-map "\C-c\C-d"
-      'desirepath-report-mode-delete-file-noconfirm)
+		'desirepath-report-mode-delete-file-noconfirm)
     (define-key desirepath-report-mode-map "\C-cd"
-      'desirepath-report-mode-dired)
+		'desirepath-report-mode-dired)
     (define-key desirepath-report-mode-map "\C-p"
-      'desirepath-report-mode-previous)
+		'desirepath-report-mode-previous)
     (define-key desirepath-report-mode-map [(control up)]
-      'desirepath-report-mode-previous)
+		'desirepath-report-mode-previous)
     (define-key desirepath-report-mode-map "\C-n"
-      'desirepath-report-mode-next)
+		'desirepath-report-mode-next)
     (define-key desirepath-report-mode-map [(control down)]
-      'desirepath-report-mode-next)
+		'desirepath-report-mode-next)
     (define-key desirepath-report-mode-map "\C-cr"
-      'desirepath-cache-duplicate-report)
+		'desirepath-cache-duplicate-report)
     (define-key desirepath-report-mode-map "\C-cg"
-      'desirepath-cache-regenerate)
+		'desirepath-cache-regenerate)
     (define-key desirepath-report-mode-map [(cl-return)]
-      'desirepath-report-mode-find-file)
+		'desirepath-report-mode-find-file)
     (define-key desirepath-report-mode-map "\C-cf"
-      'desirepath-report-mode-find-file)))
+		'desirepath-report-mode-find-file)))
 
 ;;}}}
 ;;{{{ Debug
@@ -3552,20 +3618,9 @@ Return:
   "Developer function. Test everything with full debug and CLEAR buffer."
   (interactive "P")
   (desirepath-debug-wrapper-macro
-   (if clear
-       (erase-buffer))
-   (desirepath-cache-regenerate)))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-debug-external-helper ()
-  "Developer function. Test external helper program."
-  (interactive)
-  (desirepath-debug-wrapper-macro
-   (desirepath-external-helper-call
-    (current-buffer)
-    (desirepath-external-setup-1-main)
-    'debug)))
+    (if clear
+	(erase-buffer))
+    (desirepath-cache-regenerate)))
 
 ;;}}}
 ;;{{{ Misc
@@ -3765,18 +3820,20 @@ Please run \\[desirepath-cache-regenerate]"
     t))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-file-extension-compressed (&optional list)
-  "Append `desirepath--compressed-file-extensions' to each element in LIST.
-If `desirepath--compression-support' is nil, then do nothing and return nil."
-  (let (ret)
-    (dolist (elt (or list '("")))
-      (when (stringp elt)
-	;;  `nreverse' is due to `push' which would change the order
-	(dolist (ext (reverse desirepath--compressed-file-extensions))
-	  (when (stringp ext)
-	    (push (concat elt ext) ret)))))
-    (nreverse ret)))
+  "Append compressed extensions to each element in LIST.
+Returns (ELT + EXT) for each ELT and each EXT in
+`desirepath--compressed-file-extensions'.  Returns nil when
+`desirepath--compression-support' is nil (no compression requested)."
+  (when desirepath--compression-support
+    (let (ret)
+      (dolist (elt (or list '("")))
+        (when (stringp elt)
+          (dolist (ext (reverse desirepath--compressed-file-extensions))
+            (when (stringp ext)
+              (push (concat elt ext) ret)))))
+      (nreverse ret))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -4008,18 +4065,29 @@ Return t if path is ok for current Emacs."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-directory-lisp-p (path)
-  "Check if directory has any files matching regexp `\\.elc?'."
-  (cond
-   ((not (stringp path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: [error] directory entry %s" (prin1-to-string path))))
-   ((not (file-directory-p path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: [error] directory not found %s" path)))
-   (t
-    (cl-dolist (elt (directory-files path))
-      (when (string-match "\\.elc?" elt)
-	(cl-return t))))))
+  "Return non-nil if PATH is a directory containing Lisp files.
+When `desirepath--compression-support' is non-nil, .el.gz and .el.bz2
+count as Lisp files; otherwise only .el and .elc do."
+  (let ((regexp (if desirepath--compression-support
+                    "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                  "\\.elc?$")))
+    (cond
+     ((not (stringp path))
+      (desirepath-verbose-macro 5
+        (message "Desirepath: [error] directory entry %s" (prin1-to-string path)))
+      nil)
+     ((not (file-directory-p path))
+      (desirepath-verbose-macro 5
+        (message "Desirepath: [error] directory not found %s" path))
+      nil)
+     (t
+      (let ((regexp (if desirepath--compression-support
+			"\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                      "\\.elc?$")))
+	(cl-dolist (elt (directory-files path))
+          (when (string-match regexp elt)
+            (cl-return t)))
+	nil)))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -4037,47 +4105,6 @@ Return t if path is ok for current Emacs."
 
 ;;; ----------------------------------------------------------------------
 ;;;
-(defun desirepath-self-location-load-history ()
-  "Return `load-history' entry"
-  (let (file)
-    (cl-dolist (elt load-history)
-      (setq file (car elt))
-      (when (and (stringp file)
-		 (setq file (desirepath-expand-file-name file))
-		 (string-match "^\\(.+\\)[\\/]desirepath\\." file))
-	(cl-return (match-string 1 file))))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-self-location ()
-  "If package was loaded with absolute path, return path.
-Uses `load-history' and `load-path' information."
-  (let ((ret (desirepath-self-location-load-history)))
-    (unless ret ;; No luck with load-history, try load-path
-      (cl-dolist (path load-path)
-	(setq path (file-name-as-directory (expand-file-name path)))
-	(when (or (and (file-exists-p (concat path "desirepath.el"))
-		       path)
-		  (and (file-exists-p (concat path "desirepath.elc"))
-		       path)
-		  (and (file-exists-p (concat path "desirepath.el.gz"))
-		       path))
-	  (cl-return (setq ret path)))))
-    (unless ret
-      (message
-       (concat
-	"Desirepath: SELF NOTE desirepath.el was not loaded"
-	"\tusing absolute path."
-	"\t(load \"~/some/absolute/path/desirepath.el\")"))
-      (message "Desirepath: SELF %s" (or ret "<no load-history>" )))
-    ;;  desirepath-* function is XEmacs and Emacs compatible version
-    ;;  and ensures that forward slashes are used.
-    (and ret
-	 (setq ret (desirepath-expand-file-name ret)))
-    ret))
-
-;;; ----------------------------------------------------------------------
-;;;
 (defun desirepath-autoload-file-name (function)
   "Load package if FUNCTION is in autoload state."
   (let ((str (prin1-to-string (symbol-function function))))
@@ -4091,13 +4118,13 @@ Uses `load-history' and `load-path' information."
 	  ;; It's easier and faster to do this in buffer, than
 	  ;; parsing STRING
 	  (desirepath-with-temp-buffer
-	   (insert str)
-	   (goto-char (point-min))
-	   (while (re-search-forward "\\([^\\]+\\)" nil t)
-	     (setq final (concat
-			  final
-			  (match-string 1)
-			  "/"))))
+	    (insert str)
+	    (goto-char (point-min))
+	    (while (re-search-forward "\\([^\\]+\\)" nil t)
+	      (setq final (concat
+			   final
+			   (match-string 1)
+			   "/"))))
 	  ;; remove trailing "/"
 	  (substring final 0 (1- (length final))))))))
 
@@ -4142,385 +4169,6 @@ NOERR NOMSG are parameters to `load'."
 		    "\\|" path))))))
 
 ;;}}}
-;;{{{ External: emacs-util.pl
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-1-cache ()
-  "Parse files in format `desirepath--cache'."
-  (let ((i 0)
-	(personal-count 0) ;; User files 0 .. 2000
-	(other-count 2000)
-	(emacs-count 5000)
-	(font-lock-mode nil)
-	(lazy-lock-mode nil)
-	(regexp (concat "^LISP-FILE[ \t]+"
-			"\\("
-			"\\([^ \t\r\n]+[\\/]\\)"
-			"\\([^ \t\r\n]+\\)"
-			"\\)"))
-	path
-	dir
-	file
-	emacs
-	other
-	personal
-	elt)
-    (goto-char (point-min))
-    (while (re-search-forward regexp nil t)
-      (setq path (match-string 1)
-	    dir  (match-string 2)
-	    file (match-string 3))
-      ;; was: (desirepath-path-ok-p dir) , but now perl does
-      ;; the checking
-      (when t
-	;; (set-text-properties 0 (length dir) nil dir)
-	;; (set-text-properties 0 (length file) nil file)
-	(cl-incf i)
-	(when (zerop (% i 10))
-	  (desirepath-verbose-macro 2
-	    (message "Desirepath: EXT Caching files... %d %s" i path)))
-	;; data structure is ("file.el" (1 . "/home/foo/elisp/"))
-	;;
-	;;  The reason why we put paths to separate lists is that
-	;;  OTHER directories must override the Core Emacs paths,
-	;;  so that newest files are found. Usually you can download
-	;;  newer versions than what Emacs has.
-	(cond
-	 ((desirepath-load-path-emacs-distribution-p path)
-	  (cl-incf emacs-count)
-	  (setq elt (list file (cons emacs-count dir)))
-	  (push elt emacs))
-	 ((desirepath-load-path-personal-p path)
-	  (cl-incf personal-count)
-	  (setq elt (list file (cons personal-count dir)))
-	  (push elt personal))
-	 (t
-	  (cl-incf other-count)
-	  (setq elt (list file (cons other-count dir)))
-	  (push elt other)))))
-    (append (nreverse personal) (append other emacs))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-1 (id)
-  "Parse ID from current buffer. See `desirepath-external-helper'."
-  (let ((case-fold-search t)
-	(regexp (concat "^" id "[ \t]+\\([^ \t\r\n]+\\)"))
-	string
-	list)
-    (goto-char (point-min))
-    (while (re-search-forward regexp nil t)
-      (setq string (match-string 1))
-      ;; (set-text-properties 0 (length string) nil string)
-      (push string list))
-    (unless list
-      (desirepath-verbose-macro 1
-	(message  "Desirepath: EXT PARSE FATAL (id %s)\n" id)))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-output-parse-main ()
-  "Parse current buffer. See'`desirepath-external-helper'."
-  (let (list
-	data
-	name)
-    ;;  Speedier processing
-    (buffer-disable-undo)
-    ;;  Clear text properties so that the data structures are clean
-    ;;  and possibly faster to use
-    (set-text-properties (point-min) (point-max) nil)
-    (desirepath-verbose-macro 5
-      (message  "Desirepath: EXT OUTPUT \n%s\n" (buffer-string)))
-    ;;  This list of symbols is same as the prefix string from
-    ;;  the perl script:
-    ;;
-    ;;  LISP-FILE filename-here
-    ;;  LISP-DIR filename-here
-    ;;  ...
-    (dolist (id '(info
-		  bin
-		  man
-		  lisp-dir
-		  c-src-dir))
-      (setq name (symbol-name id)
-	    data  (desirepath-external-output-parse-1 name))
-      (if (null data)
-	  (desirepath-verbose-macro 3
-	    (message "Desirepath: EXT PARSE ERROR [%s]" name))
-	(push (cons id data) list)))
-    ;;  'cache (lisp-files) handling is different. Do it now
-    (let ((data (desirepath-external-output-parse-1-cache)))
-      (if data
-	  (push (cons 'cache data) list)))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-bin-location (file)
-  "Return location of BINARY. Look from the installation dir.
-Look up `exec-path' and the kit installation directory. See
-Manual \\[desirepath-version] for more."
-  (let* ((path  (desirepath-executable-find file))
-	 (ret   path)
-	 self)
-    (when (and (null path)
-	       (setq self (desirepath-self-location)))
-      ;;  PATH/to/.../lisp/tiny/<desirepath.el>
-      ;;            |
-      ;;            |
-      ;;            /bin/emacs-util.pl
-      (setq self (desirepath-expand-file-name self))
-      (setq self
-	    (concat
-	     (file-name-as-directory self)
-	     ;;  PATH/to/lisp/files/<desirepath.el>
-	     "../../bin/"
-	     file))
-      (if (file-exists-p self)
-	  (setq ret self)))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT bin location %s" ret))
-    (when (and ret
-	       (not (file-exists-p ret)))
-      (message "Desirepath: EXT FATAL, bin location is wrong %s" ret)
-      (setq ret nil))
-    ret))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-helper-call (buffer path-list &optional debug)
-  "Use external helper Perl script if available.
-First, Environment must contain perl executable and second
-`desirepath--external-util-bin' must be along path.
-
-Input:
-
-  BUFFER     Where to output.
-  PATH-LIST  list of root directories to search.
-  DEBUG      Request debug.
-
-Return:
-
-  t          If external utility was found and called."
-  (let* ((file  desirepath--external-util-bin)
-	 (perl  (desirepath-executable-find-binary "perl"))
-	 (bin   (desirepath-external-bin-location
-		 desirepath--external-util-bin))
-	 (opt   (or path-list
-		    (error "Desirepath: path-list is empty.")))
-	 (ignore desirepath--load-path-ignore-regexp))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT perl location %s" (or perl "<not found>")))
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT exec-path %s %s" file (or bin "<not found>")))
-    (when debug
-      (push "3" opt)
-      (push "--debug" opt))
-    (when (and desirepath--win32-p
-	       (not desirepath--win32-cygwin-p))
-      (push "no-symlinks" opt)
-      (push "--scan-type" opt))
-    (setq ignore
-	  (concat
-	   (or ignore "")
-	   (if (stringp ignore)
-	       "\\|" "")
-	   (if desirepath--xemacs-p
-	       "[/\\]emacs"
-	     "[/\\]xemacs")))
-    (dolist (switch (list
-		     "--Info"
-		     "--Man"
-		     "--Bin"
-		     "--Lang-lisp-file"
-		     "--Lang-lisp-dir"
-		     "--Lang-c-src-dir"
-		     ignore
-		     "--ignore-emacs-regexp"))
-      ;;  These will go to the beginning, which is ok.
-      (push switch opt))
-    (push bin opt)
-    (when debug
-      ;;  If Emacs hangs, at least we know how the external command was called.
-      (find-file "~/emacs-debug-desirepath.log")
-      (erase-buffer)
-      (insert (pp opt))
-      (save-buffer))
-    (if (null (and perl bin))
-	(desirepath-verbose-macro 5
-	  "Desirepath: EXT ERROR Can't call external utility")
-      (message "Desirepath: EXT Process running... [please wait] %s"
-	       (mapconcat 'identity opt " "))
-      (with-current-buffer buffer
-	(apply 'call-process
-	       perl
-	       nil
-	       (current-buffer)
-	       nil
-	       opt)
-	(desirepath-verbose-macro 9
-	  (message
-	   (concat "\nDesirepath: EXT OUTPUT END\n")))
-	(message "Desirepath: EXT done %s" bin)
-	t))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-helper-main (path-list)
-  "Call external helper with PATH-LIST and parse output.
-
-Return:
-
-  '((info . (path path ..))
-    (man  . (path path ..))
-    (bin  . (path path ..))
-    (lisp . (path path ..))
-    (cache . <FORMAT EQUALS TO DESIREPATH--CACHE>))."
-  (desirepath-with-temp-buffer
-   (when (desirepath-external-helper-call (current-buffer) path-list)
-     (desirepath-external-output-parse-main))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-1-main ()
-  "Return paths to pass to external program."
-  (let (list)
-    (dolist (elt (list
-		  ;; load-path must not be there, because it may be already
-		  ;; populated from the cache file: the one that we are
-		  ;; trying to build from fresh.
-		  ;;
-		  ;; -> do not add `load-path' to returned list
-		  ;;
-		  ;; But we can add the original load path which were
-		  ;; saved at startup.
-		  desirepath--extra-path-root
-		  desirepath--original-load-path
-		  desirepath--load-path-root
-		  (desirepath-Info-default-directory-list)))
-      (dolist (path elt)
-	(when (and (stringp path)
-		   (not (string-match "^[ \t]+$" path))
-		   (file-directory-p path))
-	  (push (desirepath-expand-file-name path) list))))
-    list))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-cache (data)
-  "Set `desirepath--cache from DATA '((cache (DATA) ..)."
-  (let ((list (assq 'cache data)))
-    (when list
-      (setq list (cdr list))
-      (setq desirepath--cache list))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defsubst desirepath-external-setup-1-load-path (path regexp)
-  "Add PATH to `load-path'. Use REGEXP to check validity."
-  ;; The perl program recursed ALL directories, but we only
-  ;; want to find out lisp dirs that USER requested in
-  ;; `load-path' and `desirepath--load-path-root'
-  ;;
-  ;; lisp-roots is a lookup string "PATH\\|PATH\\|PATH .."
-  ;; which we can use to check if path is accepted
-  ;;
-  (cond
-   ((not (string-match regexp path))
-    (desirepath-verbose-macro 5
-      (message "Desirepath: PATH-NOK not candidate %s" path)))
-   ((desirepath-path-ok-p path)
-    (cl-pushnew path load-path :test 'string=))))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defsubst desirepath-external-setup-1-man-path (path)
-  "Add PATH to `desirepath--extra-manpath'."
-  (when (or (not (stringp
-		  desirepath--manpath-ignore-regexp))
-	    (not (string-match
-		  desirepath--manpath-ignore-regexp
-		  path)))
-    (cl-pushnew path desirepath--extra-manpath :test 'string=)))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-load-path-lookup-regexp ()
-  "Return candidate `load-path' lookup regexp.
-This is combination of `load-path' and `desirepath--load-path-root'."
-  (let ((lisp-roots (append load-path
-			    desirepath--load-path-root)))
-    ;; Make lookup regexp
-    (mapconcat
-     (function
-      (lambda (x)
-	(regexp-quote
-	 (desirepath-expand-file-name x))))
-     lisp-roots
-     "\\|")))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup-parse-data (data)
-  "Parse external tool's DATA structure."
-  (let ((lisp-lookup (desirepath-external-load-path-lookup-regexp))
-	correct-emacs
-	type)
-    (when data
-      (dolist (elt data)
-	(setq type (car elt))
-	(cl-dolist (path (cdr elt))
-	  ;; 'cache element is not a string.
-	  (when (stringp path)
-	    (setq correct-emacs
-		  (desirepath-path-ok-this-emacs-p path)))
-	  (cond
-	   ((equal type 'cache)
-	    ;; Not handled in this loop
-	    (cl-return))
-	   ((and (equal type 'lisp-dir)
-		 correct-emacs)
-	    (desirepath-external-setup-1-load-path path lisp-lookup))
-	   ((equal type 'man)
-	    (desirepath-external-setup-1-man-path path))
-	   ((equal type 'c-src-dir)
-	    (cl-pushnew path
-		     desirepath--extra-ff-search-directories
-		     :test
-		     'string=))
-	   ((and (equal type 'bin)
-		 correct-emacs)
-	    (desirepath-exec-path-append path))
-	   ((and (equal type 'info)
-		 correct-emacs)
-	    (desirepath-info-handler path)
-	    (cl-pushnew path
-		     (desirepath-Info-default-directory-list)
-		     :test
-		     'string=)))))
-      (desirepath-external-setup-cache data)) ;; When
-    (desirepath-verbose-macro 3
-      (message "Desirepath: EXT END desirepath-external-setup %s"
-	       (if data
-		   "[DATA OK]"
-		 "[DATA NOK]")))
-    data))
-
-;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-external-setup ()
-  "Use external tool to help setup emacs.
-See `desirepath-external-helper-main'."
-  (and
-   (setq desirepath--external-data-structure
-	 (desirepath-external-helper-main
-	  (desirepath-external-setup-1-main)))
-   (desirepath-external-setup-parse-data
-    desirepath--external-data-structure)))
-
-;;}}}
 ;;{{{ Cache
 
 ;;; ----------------------------------------------------------------------
@@ -4562,7 +4210,7 @@ See `desirepath-external-helper-main'."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-cache-p-1-new-cache-lookup
-  (package choices &optional regexp)
+    (package choices &optional regexp)
   "Search PACKAGE and CHOICES from `desirepath--cache'.
 Input:
 
@@ -4635,27 +4283,27 @@ Return:
        (catch 'done
 	 (cl-flet* (;; First function
 		    (path-name (ELT) ;; ELT = '("FILE.EL" (POS . "PATH/"))
-			       (when ELT
-				 (concat (cdr (nth 1 ELT)) (car ELT)  )))
+		      (when ELT
+			(concat (cdr (nth 1 ELT)) (car ELT)  )))
 		    ;; Second function
 		    (throw-ignore
-		     (ELT)
-		     (cond
-		      ((and ELT
-			    (or (and (stringp regexp1)
-				     (string-match regexp1
-						   (car ELT)))
-				(and (stringp regexp2)
-				     (let (case-fold-search)
-				       (string-match regexp2
-						     (cdr (nth 1 ELT)))))))
-		       (desirepath-verbose-macro 10
-			 (message "%s`ignore-file-regexp' %s"
-				  fid
-				  (car ELT)))
-		       nil)
-		      (ELT
-		       (throw 'done (path-name ELT))))))
+		      (ELT)
+		      (cond
+		       ((and ELT
+			     (or (and (stringp regexp1)
+				      (string-match regexp1
+						    (car ELT)))
+				 (and (stringp regexp2)
+				      (let (case-fold-search)
+					(string-match regexp2
+						      (cdr (nth 1 ELT)))))))
+			(desirepath-verbose-macro 10
+			  (message "%s`ignore-file-regexp' %s"
+				   fid
+				   (car ELT)))
+			nil)
+		       (ELT
+			(throw 'done (path-name ELT))))))
 	   (desirepath-verbose-macro 10
 	     (message (concat fid " ENTRY %s %s")
 		      package
@@ -4873,69 +4521,50 @@ If FLAG is non-nil, return package names, not cache elements."
     (nreverse list)))
 
 ;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-cache-file-hostname-old ()
-  "Return `system-name'."
-  (downcase
-  (or
-   (or
-    (getenv "HOST")		;Unix
-    (getenv "HOSTNAME")		;Unix
-    (getenv "COMPUTERNAME"))	;Win32
-    "unknownhost")
-   )
-  )
 
 (defun desirepath-cache-file-hostname ()
-    (downcase system-name)
-)
+  "Return the current hostname for the cache file name.
+See `desirepath--cache-file-hostname-function'."
+  (downcase system-name))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-cache-file-name ()
-  "Return Emacs version specific cache file.
+  "Return the Emacs-version-specific cache file name.
+
+The name has the form
+
+  <prefix>-<win32><cygwin><host-><type>-<version><postfix>
+
+where <host-> is only present when
+`desirepath--cache-file-hostname-function' is non-nil and returns a
+string (default: absent, see P2.5 / `desirepath--cache-file-hostname-function').
 
 References:
 
   `desirepath--cache-file-prefix'.
-  `desirepath--cache-file-postfix'"
-  (let* (host
-	 (type (if desirepath--xemacs-p
-		   "xemacs"
-		 "emacs"))
-	 (list (desirepath-emacs-versions))
-	 (ver  (or (nth 1 list)
-		   (nth 0 list)))
-	 (win32  (if desirepath--win32-p
-		     "win32-"
-		   ""))
-	 (cygwin (if desirepath--win32-cygwin-p
-		     "cygwin-"
-		   ""))
-	 (host-func desirepath--cache-file-hostname-function)
-	 ret)
-    (when (and host-func
-	       (functionp host-func))
-      (let (ret)
-	(setq ret (funcall host-func))
-	(desirepath-verbose-macro 3
-	  (message "Desirepath: CACHE file host function returned %s"
-		   (or ret "nil")))
-	(if (stringp ret)
-	    (setq host ret))))
-    (setq ret
-	  (concat desirepath--cache-file-prefix
-		  "-"
-		  win32
-		  cygwin
-		  (if (stringp host)
-		      (concat host "-")
-		    "")
-		  type
-		  "-"
-		  ver
-		  desirepath--cache-file-postfix))
-    ret))
+  `desirepath--cache-file-hostname-function'.
+  `desirepath--cache-file-postfix'."
+  (let* ((type   (if desirepath--xemacs-p "xemacs" "emacs"))
+         (ver    (or (nth 1 (desirepath-emacs-versions))
+                     (nth 0 (desirepath-emacs-versions))))
+         (win32  (if desirepath--win32-p       "win32-"  ""))
+         (cygwin (if desirepath--win32-cygwin-p "cygwin-" ""))
+         (host   (when (functionp desirepath--cache-file-hostname-function)
+                   (let ((h (funcall desirepath--cache-file-hostname-function)))
+                     (desirepath-verbose-macro 5
+		       (message "Desirepath: CACHE file host function returned %s"
+                                (or h "nil")))
+                     (and (stringp h) h)))))
+    (concat desirepath--cache-file-prefix
+            "-"
+            win32
+            cygwin
+            (if host (concat host "-") "")
+            type
+            "-"
+            ver
+            desirepath--cache-file-postfix)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -4964,14 +4593,16 @@ compiled and non-compiled files."
     (when (file-exists-p file)
       (delete-file file)
       (desirepath-verbose-macro 5
-			      (message "Desirepath: Cache deleted: %s" file)))))
+	(message "Desirepath: Cache deleted: %s" file)))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-cache-file-old-p (file)
-  "Return non-nil if FILE exists and is too old.
-References:
-  `desirepath--cache-expiry-days'."
+  "Return non-nil if FILE exists and is older than the expiry.
+Returns nil when FILE does not exist, when `desirepath--cache-expiry-days'
+is nil (cache never expires), or when the file is still fresh.
+Use `desirepath-cache-file-needs-bootstrap-p' to test the broader
+condition \"cache is absent or expired\"."
   (when (and (file-exists-p file)
 	     (integerp desirepath--cache-expiry-days))
     (let ((days (desirepath-days-old file)))
@@ -5074,10 +4705,10 @@ Optionally INSERT."
   (interactive "P")
   (if desirepath--cache-level-two
       (desirepath-list-display "desirepath--cache-level-two %s"
-			     desirepath--cache-level-two insert)
+			       desirepath--cache-level-two insert)
     (message "desirepath--cache-level-two is empty, nothing to display."))
   (desirepath-list-display "desirepath--cache %s"
-			 desirepath--cache insert))
+			   desirepath--cache insert))
 
 ;;}}}
 ;;{{{ Info files
@@ -5102,6 +4733,20 @@ Optionally INSERT."
   "*This variable includes a basic `dir' file for Emacs info.
 Do not change.")
 
+(defcustom desirepath--info-manage-dir-file nil
+  "Whether `desirepath' may create or update `dir' files.
+When nil (the default), `desirepath' never writes `dir' files.
+This avoids conflicts with `install-info' and package managers, which
+own `dir' files in system-wide info directories such as
+\"/usr/share/info\" and update them via `update-info-dir'.
+
+When t, `desirepath' creates a `dir' file in any directory that
+contains `.info' files but no `dir', and populates it with basic
+directory entries.  Enable this only for local (non-system) info
+directories that you manage manually."
+  :type 'boolean
+  :group 'Desirepath)
+
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-info-display (&optional insert)
@@ -5120,12 +4765,13 @@ This would be `Info-directory-list' in XEmacs and
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-Info-default-directory-list-clean ()
-  "Clean `Info-default-directory-list'.
+  "Clean the Info directory list.
 Remove any suspicious elements: non-directories, non-strings."
+  (desirepath--info-ensure-initialized)
   (set (desirepath-Info-default-directory-list-sym)
        (desirepath-directory-list-clean
-	(desirepath-Info-default-directory-list)
-	"Info-directory-list")))
+        (desirepath-Info-default-directory-list)
+        "Info-directory-list")))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -5177,8 +4823,8 @@ Returned list in the above case is '(\"Tar\" \"Fileutils\")."
 		  (when (string-match re file)
 		    (throw 'exit file)))))
 	(cl-pushnew (capitalize (downcase (match-string 1 file)))
-		 ret
-		 :test 'string=)))
+		    ret
+		    :test 'string=)))
     (sort ret 'string-lessp)))
 
 ;;; ----------------------------------------------------------------------
@@ -5209,10 +4855,12 @@ Returned list in the above case is '(\"Tar\" \"Fileutils\")."
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-info-directory-contents-update
-  (file &optional verb interactive info-files)
+    (file &optional verb interactive info-files)
   "Update the central `dir' with all new info files in directory.
 Give the absolute path to the `dir' and the directory is scanned
 for new entries which are updated to file `dir'.
+
+Does nothing unless `desirepath--info-manage-dir-file' is non-nil.
 
 Input:
 
@@ -5227,147 +4875,80 @@ Return:
 
   ;;  (interactive "FInfo file named `dir', location: ")
 
-  (when (file-directory-p file)
-    (error "You must give a filename"))
-  (let ((buffer (find-file-noselect file))
-	done
-	buffer-file)
-    (with-current-buffer buffer
-      ;;  If we read /usr/local/info and we're not root, then
-      ;;  this buffer will be read only. Make it writable. The
-      ;;  save error is handled elsewhere.
-      ;;
-      (setq buffer-read-only nil)
-      (desirepath-verbose-macro 1
-	(message "Desirepath: [INFO] found %s" file))
-      (let ((entries (or info-files
-			 (desirepath-info-files-in-directory
-			  (file-name-directory file)))))
-	(dolist (entry entries)
-	  (unless (desirepath-info-directory-entry-p entry)
-	    (goto-char (point-max))
-	    (unless (looking-at "^[\n\t ]*$")
-	      (insert "\n"))
-	    (insert (format "* %s: (%s).\n" entry entry))
-	    (desirepath-verbose-macro 2
-	      (message "Desirepath: [INFO] added entry `%s' to file %s"
-		       entry file))
-	    (setq done t)
-	    (set-buffer-modified-p nil) ;; do not ask user  when killing buffer
-	    (setq buffer-file (buffer-file-name))))) ;; let*
-      (if (called-interactively-p 'interactive)
-	  (when done
-	    (message "Desirepath: [INFO] Edit and verify changes at %s" file))
-	(when (and done buffer-file)
-	  (desirepath-write-region (point-min) (point-max) buffer-file))
-	(when (buffer-live-p buffer)
-	  (kill-buffer buffer)))) ;; With-current
-    done))
+  (when desirepath--info-manage-dir-file
+    (when (file-directory-p file)
+      (error "You must give a filename"))
+    (let ((buffer (find-file-noselect file))
+          done
+          buffer-file)
+      (with-current-buffer buffer
+        ;;  If we read /usr/local/info and we're not root, then
+        ;;  this buffer will be read only. Make it writable. The
+        ;;  save error is handled elsewhere.
+        ;;
+        (setq buffer-read-only nil)
+        (desirepath-verbose-macro 1
+          (message "Desirepath: [INFO] found %s" file))
+        (let ((entries (or info-files
+                           (desirepath-info-files-in-directory
+                            (file-name-directory file)))))
+          (dolist (entry entries)
+            (unless (desirepath-info-directory-entry-p entry)
+	      (goto-char (point-max))
+	      (unless (looking-at "^[\n\t ]*$")
+                (insert "\n"))
+	      (insert (format "* %s: (%s).\n" entry entry))
+	      (desirepath-verbose-macro 2
+                (message "Desirepath: [INFO] added entry `%s' to file %s"
+                         entry file))
+	      (setq done t)
+	      (set-buffer-modified-p nil)
+	      (setq buffer-file (buffer-file-name)))))
+        (if (called-interactively-p 'interactive)
+            (when done
+	      (message "Desirepath: [INFO] Edit and verify changes at %s" file))
+          (when (and done buffer-file)
+            (desirepath-write-region (point-min) (point-max) buffer-file))
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer))))
+      done)))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-file-DIR (path)
   "Make `dir' file name using PATH."
   (concat (file-name-as-directory path) "dir"))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-handler-DIR (dir)
-  "Handle creating/updating central info file DIR `dir' to current directory."
-  (let ((dir-file (desirepath-info-file-DIR dir)))
-    (unless (file-exists-p dir-file)  ;No central dir, generate one...
-      (desirepath-verbose-macro 3
-	(message "Desirepath: [INFO] missing central `dir' generating %s"
-		 dir-file))
-      (desirepath-with-temp-buffer
-       (insert desirepath--info-file-basic-contents)
-       (insert " "
-	       (desirepath-expand-file-name dir)
-	       "\n")
-       ;;  maybe we don't have permission to write to this directory?
-       (desirepath-write-region (point-min) (point-max) dir-file)
-       t))))
+  "Handle creating/updating central info file DIR `dir' to current directory.
+Does nothing unless `desirepath--info-manage-dir-file' is non-nil.
+The default nil avoids conflicting with `install-info' and package
+managers, which own `dir' files in system-wide info directories."
+  (when desirepath--info-manage-dir-file
+    (let ((dir-file (desirepath-info-file-DIR dir)))
+      (unless (file-exists-p dir-file)  ;No central dir, generate one...
+        (desirepath-verbose-macro 3
+          (message "Desirepath: [INFO] missing central `dir' generating %s"
+                   dir-file))
+        (desirepath-with-temp-buffer
+          (insert desirepath--info-file-basic-contents)
+          (insert " " (desirepath-expand-file-name dir) "\n")
+          ;;  maybe we don't have permission to write to this directory?
+          (desirepath-write-region (point-min) (point-max) dir-file)
+          t)))))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-handler (dir)
   "Check if DIR contains info files and a special `dir' file.
-This function will create `dir' file if it does not exist,
-update `Info-default-directory-list' and add any new INFO entries in
-DIR to central `dir' file in that directory.
-
-Please suggest to the lisp package maintainer that he
-should ship with default `dir' in next release so that it
-could be automatically used.
-
-Return
-
-  t   if any changes made."
-  (interactive "fGive directory with info files: ")
-  ;;  If user calls us, make sure new files are also noticed.
-  ;;
-  (if (called-interactively-p 'interactive)
-      (desirepath-info-initialize))
-  (let ((list     (desirepath-info-files-in-directory dir))
-	(dir-file (concat (file-name-as-directory dir) "dir"))
-	cleanup
-	done)
-    (when (and (null list)
-	       (called-interactively-p 'interactive))
-      (message "Desirepath: No info file candidates in %s" dir))
-    (when list                          ;info files in this directory?
-      (setq done (desirepath-info-handler-DIR dir))
-    ;  (desirepath-info-directory-contents-update
-    ;   dir-file
-    ;   (called-interactively-p 'interactive)
-    ;   (called-interactively-p 'interactive)
-    ;   list)
-      (desirepath-verbose-macro 2
-	(message "Desirepath: [INFO] PUSH maybe => %s"
-		 dir))
-      (desirepath-verbose-macro 5
-	(message
-	 "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
-	 (prin1-to-string (desirepath-Info-default-directory-list))))
-      ;;  Always add found directories to the list.
-      ;;  Notice, that directory may contain trailing slash, that's why
-      ;;  two `member' tests
-      ;;
-      ;;   ../info
-      ;;   ../info/
-      ;;
-      (let* ((dir1 (file-name-as-directory dir))         ;; with slash
-	     (dir2 (substring dir 0 (1- (length dir1)))) ;; without
-	     (list (desirepath-Info-default-directory-list)))
-	(unless (or (member dir1 list)
-		    (member dir2 list))
-	  (desirepath-verbose-macro 2
-	    (message
-	     "Desirepath: [INFO] PUSH Info-default-directory-list => %s" dir2))
-	  (setq cleanup t)
-	  ;;  This is efectively "(push dir2 <info-list>)"
-	  (set (desirepath-Info-default-directory-list-sym)
-	       (cons dir2 (desirepath-Info-default-directory-list)))
-	  (desirepath-verbose-macro 5
-	    (message
-	     "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list))))))
-      ;;  Kill all previous info files from Emacs, so that next info
-      ;;  C-h i will force Emacs to regenerate found new entries.
-      (when (or cleanup                 ;Added new directory
-		(called-interactively-p 'interactive))
-	(desirepath-info-initialize)))
-    done))
-
-(defun desirepath-info-handler- (dir)
-  "Check if DIR contains info files and a special `dir' file.
-This function will create `dir' file if it does not exist,
-update `Info-default-directory-list' and add any new INFO entries in
-DIR to central `dir' file in that directory.
-
-Please suggest to the lisp package maintainer that he
-should ship with default `dir' in next release so that it
-could be automatically used.
+If `desirepath--info-manage-dir-file' is non-nil and DIR has `.info'
+files but no `dir', a minimal `dir' is created.  If DIR has a `dir'
+file, DIR is added to `Info-directory-list' (unless it is already
+there).  If DIR has `.info' files but no `dir' and dir creation is
+disabled, DIR is silently skipped: without a `dir' file Info cannot
+index its contents anyway.
 
 Return
 
@@ -5385,51 +4966,43 @@ Return
 	       (called-interactively-p 'interactive))
       (message "Desirepath: No info file candidates in %s" dir))
     (when list                          ;info files in this directory?
+      ;; Optionally create `dir' (only if `desirepath--info-manage-dir-file').
       (setq done (desirepath-info-handler-DIR dir))
-      (desirepath-info-directory-contents-update
-       dir-file
-       (called-interactively-p 'interactive)
-       (called-interactively-p 'interactive)
-       list)
-      (desirepath-verbose-macro 2
-	(message "Desirepath: [INFO] PUSH maybe => %s"
-		 dir))
-      (desirepath-verbose-macro 5
-	(message
-	 "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
-	 (prin1-to-string (desirepath-Info-default-directory-list))))
-      ;;  Always add found directories to the list.
-      ;;  Notice, that directory may contain trailing slash, that's why
-      ;;  two `member' tests
-      ;;
-      ;;   ../info
-      ;;   ../info/
-      ;;
-      (let* ((dir1 (file-name-as-directory dir))         ;; with slash
-	     (dir2 (substring dir 0 (1- (length dir1)))) ;; without
-	     (list (desirepath-Info-default-directory-list)))
-	(unless (or (member dir1 list)
-		    (member dir2 list))
-	  (desirepath-verbose-macro 2
-	    (message
-	     "Desirepath: [INFO] PUSH Info-default-directory-list => %s" dir2))
-	  (setq cleanup t)
-	  ;;  This is efectively "(push dir2 <info-list>)"
-	  (set (desirepath-Info-default-directory-list-sym)
-	       (cons dir2 (desirepath-Info-default-directory-list)))
-	  (desirepath-verbose-macro 5
-	    (message
-	     "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list))))))
-      ;;  Kill all previous info files from Emacs, so that next info
-      ;;  C-h i will force Emacs to regenerate found new entries.
-      (when (or cleanup                 ;Added new directory
-		(called-interactively-p 'interactive))
-	(desirepath-info-initialize)))
+      ;; Info can only index a directory if it contains a `dir' file.
+      ;; Adding a directory without one to `Info-directory-list' would
+      ;; only pollute the list with useless entries.
+      (when (file-exists-p dir-file)
+        (desirepath-verbose-macro 2
+          (message "Desirepath: [INFO] PUSH maybe => %s" dir))
+        (desirepath-verbose-macro 5
+          (message
+           "Desirepath: [INFO] PUSH (before) Info-default-directory-list: %s"
+           (prin1-to-string (desirepath-Info-default-directory-list))))
+        (let* ((dir1 (file-name-as-directory dir))         ;; with slash
+	       (dir2 (substring dir 0 (1- (length dir1)))) ;; without
+	       (list (desirepath-Info-default-directory-list)))
+          (unless (or (member dir1 list)
+		      (member dir2 list))
+            (desirepath-verbose-macro 2
+	      (message
+	       "Desirepath: [INFO] PUSH Info-default-directory-list => %s"
+	       dir2))
+            (setq cleanup t)
+            (set (desirepath-Info-default-directory-list-sym)
+                 (cons dir2 (desirepath-Info-default-directory-list)))
+            (desirepath-verbose-macro 5
+	      (message
+	       "Desirepath: [INFO] PUSH (after) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list))))))
+        ;;  Kill all previous info files from Emacs, so that next info
+        ;;  C-h i will force Emacs to regenerate found new entries.
+        (when (or cleanup                 ;Added new directory
+                  (called-interactively-p 'interactive))
+          (desirepath-info-initialize))))
     done))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-info-kill-buffers ()
   "Kill all *info* buffers."
   ;;  - There may be hidden buffers that Emacs uses to gather
@@ -5573,10 +5146,10 @@ E.g., if you want to calculate days; you'd do
 	list)
     (when path
       (desirepath-with-temp-buffer
-       (insert path)
-       (goto-char (point-min))
-       (while (re-search-forward regexp nil t)
-	 (push (match-string 0) list))))
+	(insert path)
+	(goto-char (point-min))
+	(while (re-search-forward regexp nil t)
+	  (push (match-string 0) list))))
     (nreverse list)))
 
 ;;; ----------------------------------------------------------------------
@@ -5955,7 +5528,7 @@ Return t if removed something."
   "Remove any matching REGEXP from `desirepath--cache'.
 Return t if removed something."
   (let ((spare desirepath--cache)
-	 status)
+	status)
     (dolist (elt desirepath--cache)
       (when (string-match regexp
 			  ;;  ELT = '("file.el" (POS . "path"))
@@ -5998,37 +5571,54 @@ is not a string. `desirepath--load-path-root': %s "
 ;;;}}}
 ;;;{{{ Cache
 
+(defun desirepath-cache-file-needs-bootstrap-p ()
+  "Return non-nil if the `load-path' cache needs a bootstrap scan.
+Returns t when the cache file is missing, when `desirepath--cache-file-prefix'
+is nil, or when the cache file exists but is older than
+`desirepath--cache-expiry-days'.  In all these cases callers should
+invoke `desirepath-load-path-initial-value' so that core Emacs lisp
+directories are present in `load-path' before the cache is rebuilt.
+
+The old condition `(desirepath-cache-file-old-p file)' only fired for
+an *existing* but *stale* cache, so the very first run (no cache file
+at all) skipped the bootstrap entirely."
+  (let ((file (desirepath-cache-file-name)))
+    (or (null file)
+        (not (file-exists-p file))
+        (and (desirepath-cache-file-old-p file) t))))
+
 ;;; ----------------------------------------------------------------------
 ;;;
 (defun desirepath-load-path-directory-files (path-list)
-  "Return all files along PATH-LIST."
+  "Return all files along PATH-LIST.
+When `desirepath--compression-support' is non-nil, files ending in
+.gz or .bz2 are included in addition to .el and .elc, matching the
+set of files that `locate-library' and `require' can actually find."
   (let ((count 0)
-	list)
+        (regexp (if desirepath--compression-support
+                    "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                  "\\.elc?$"))
+        list)
     (dolist (dir path-list)
       (when (and (stringp dir)
-		 (file-directory-p dir))
-	;;   make sure directory has a slash at the end
-	(setq dir (file-name-as-directory dir))
-	;;  TRAD means "traditional Emacs Lisp way", because
-	;;  there is new method EXT for "External tool" to do similar
-	;;  caching. In fact if you see these messages, something
-	;;  went wrong with the EXT method.
-	(desirepath-verbose-macro 1
-	  (message "Desirepath: TRAD Caching files... %d %s"
-		   (length list)
-		   dir))
-	(dolist (file (directory-files dir nil "\\.elc?$"))
+                 (file-directory-p dir))
+        (setq dir (file-name-as-directory dir))
+        (desirepath-verbose-macro 1
+          (message "Desirepath: TRAD Caching files... %d %s"
+                   (length list) dir))
+	(dolist (file (directory-files
+		       dir nil
+		       (if desirepath--compression-support
+                           "\\.elc?\\(\\.\\(gz\\|bz2\\)\\)?$"
+                         "\\.elc?$")))
 	  (unless (file-directory-p (concat dir file))
 	    (cl-incf count)
-	    (when (or t ) ;; (string-match "other" dir))
-	      (desirepath-verbose-macro 9
-		(message "Desirepath: TRAD Cached %s"
-			 (concat dir file))))
-	    (push (list file (cons count
-				   (desirepath-expand-file-name dir)))
-		  list)))))
-    ;; Preserve find order.
-    ;; (nreverse list)
+            (desirepath-verbose-macro 9
+	      (message "Desirepath: TRAD Cached %s"
+		       (concat dir file)))
+            (push (list file (cons count
+                                   (desirepath-expand-file-name dir)))
+                  list)))))
     list))
 
 ;;; ----------------------------------------------------------------------
@@ -6049,33 +5639,34 @@ You should call `desirepath-cache-setup-scan' after this function."
   (desirepath-load-path-clean))
 
 ;;; ----------------------------------------------------------------------
-;;;
-(defun desirepath-cache-setup-scan (&optional traditional)
-  "Build the cache either by using external program or Emacs Lisp."
-  (let ((external (not traditional))
-	;;  While loading this package Cygwin XEmacs garbage collects like mad.
-	;;  Ease it up for a while. This is 30Meg
-	(gc-cons-threshold (* 1024 1024 30)))
-    (or (and external
-	     (desirepath-external-setup))
-	(progn
-	  (desirepath-verbose-macro 3
-	    (message
-	     (concat
-	      "Desirepath: "
-	      "TRAD lisp method used for scanning.")))
-	  (desirepath-maybe-warn-message-log-max)
-	  (desirepath-info-scan-Info-default-directory-list)
-	  (funcall desirepath--load-path-function)
-	  (setq desirepath--cache (desirepath-load-path-directory-files
-				 load-path))))
+
+(defun desirepath-cache-setup-scan (&optional _traditional)
+  "Build the cache using the Emacs Lisp scanner.
+TRADITIONAL is accepted for backwards compatibility and ignored: the
+Perl helper (`emacs-util.pl') used by older tiny-tools releases is no
+longer used.  The native scanner is fast enough on modern machines
+(thousands of files per second).
+
+Always returns nil; the side effects are the updated `desirepath--cache'
+and `load-path'."
+  (let ((gc-cons-threshold (* 1024 1024 30)))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: TRAD lisp method used for scanning."))
+    (desirepath-maybe-warn-message-log-max)
+    (desirepath-info-scan-Info-default-directory-list)
+    (funcall desirepath--load-path-function)
+    (setq desirepath--cache
+          (desirepath-load-path-directory-files load-path))
     ;;  many push and pushnew were called.
     (when (fboundp 'garbage-collect)
-      (message "Desirepath: cache-setup-scan requested `garbage-collect'")
-      (garbage-collect))))
+      (desirepath-verbose-macro 5
+	(message "Desirepath: cache-setup-scan requested `garbage-collect'"))
+      (garbage-collect))
+    nil))
+
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-cache-status-string ()
   "Return cache statistics."
   (format "Desirepath: packages %d, load-path %d, exec-path %d, info %d"
@@ -6102,7 +5693,13 @@ rescan directories if cache file is older than
 Input:
 
   FORCE       Rescan and save cache.
-  TRADITIONAL Use traditional Emacs lisp cache scan."
+  TRADITIONAL Use traditional Emacs lisp cache scan.
+Return:
+
+  nil   Always.  Side effects: `load-path', `exec-path',
+        `Info-directory-list', and `desirepath--cache' are updated; if
+        FORCE is non-nil or the cache was rebuilt, the cache file is
+        saved to disk."
   (interactive "P")
   (let* ((file       (desirepath-cache-file-name))
 	 (read-cache (and (null force)
@@ -6188,7 +5785,8 @@ Input:
     (desirepath-cache-status-message)
     ;; Make sure that this list is cleared. It must be
     ;; regenerated as well.
-    (desirepath-emacs-lisp-file-list-cache-clear)))
+    (desirepath-emacs-lisp-file-list-cache-clear)
+    nil))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -6197,7 +5795,7 @@ Input:
   (when (or (desirepath-cache-non-existing-directory-list)
 	    (desirepath-cache-non-existing-file-list))
     (desirepath-verbose-macro 2
-			    (message "Desirepath: Cache validate: inconsistent state, rebuilding..."))
+      (message "Desirepath: Cache validate: inconsistent state, rebuilding..."))
     (desirepath-cache-setup-main 'force)))
 
 ;;; ----------------------------------------------------------------------
@@ -6582,28 +6180,20 @@ Warning:
   packages or if you have added new Lisp files to your system. Keep also
   `desirepath--cache-expiry-days' relatively small if you update often."
   (interactive "P")
-  (let ((list '( ;; autoload   => see below
-		locate-library
-		load
-		require)))
-    ;; In Emacs (at least on 20.7), load-library is a wrapper for load. So,
-    ;; it makes no sense advising it, because the cache is searched twice.
-    ;; #todo: check this code .. and xemacs `load-library'
-    (when t ;;  desirepath--xemacs-p
-      (push 'load-library list))
-    ;;  Activate only if user requested 'all
-    (when (eq desirepath--compression-support 'all)
-      (push 'autoload list))
+  (let ((old desirepath--cache-mode))
     (desirepath-ti::bool-toggle desirepath--cache-mode mode)
     (cond
+     ((eq old desirepath--cache-mode)
+      ;; No state change: skip advice churn and log noise.
+      nil)
      (desirepath--cache-mode
-      (desirepath-ti::advice-control list "desirepath")
+      (desirepath-advice-instantiate)
       (if (called-interactively-p 'interactive)
-	  (message "Desirepath: cache advice code ACTIVATED.")))
+          (message "Desirepath: cache advice code ACTIVATED.")))
      (t
-      (desirepath-ti::advice-control list "desirepath" 'disable)
+      (desirepath-advice-remove)
       (if (called-interactively-p 'interactive)
-	  (message "Desirepath: cache advice code DEACTIVATED."))))))
+          (message "Desirepath: cache advice code DEACTIVATED."))))))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -6620,186 +6210,159 @@ Warning:
   (desirepath-cache-mode -1))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun turn-on-desirepath-cache-mode-maybe ()
-  "See `desirepath-cache-mode'.
-Turn mode on only if `desirepath--cache-expiry-days' is non-nil,
-otherwise turn mode off."
+  "Turn `desirepath-cache-mode' on unless the cache is disabled.
+The cache is disabled when `desirepath--cache-enabled' is nil.
+`desirepath--cache-expiry-days' does not affect this decision: nil
+there means \"never expire\", not \"disable\"."
   (interactive)
-  (if (integerp desirepath--cache-expiry-days)
+  (if desirepath--cache-enabled
       (turn-on-desirepath-cache-mode)
     (turn-off-desirepath-cache-mode)))
 
-;;;}}}
 ;;;{{{ Advice code
 
-;; ############################ BEGIN FUNCTION -- advice instantiate
+;;; ############################ BEGIN FUNCTION -- advice instantiate
+
+;;;; Advice for load/require/locate-library/load-library/autoload.
+;;;; These replace the deprecated `defadvice' forms used by tiny-tools
+;;;; (advice.el is obsolete as of Emacs 30.1).  All advice is installed
+;;;; lazily from `desirepath-advice-instantiate', which is called from
+;;;; `desirepath-install'.
+
+(defun desirepath--autoload-advice (orig function file &rest args)
+  "Advice for `autoload': consult `desirepath--cache' first."
+  (let ((path (and (stringp file)
+                   (desirepath-cache-p-for-advice file))))
+    (apply orig function (or path file) args)))
+
+(defun desirepath--load-advice (orig file &optional noerror nomessage
+                                     nosuffix must-suffix
+                                     &rest extra-args)
+  "Advice for `load': consult `desirepath--cache' first.
+EXTRA-ARGS are passed through unchanged for forward compatibility."
+  (unless (stringp file)
+    (error "Parameter FILE is not a string %s" (prin1-to-string file)))
+  (if (or nosuffix must-suffix)
+      (apply orig file noerror nomessage nosuffix must-suffix extra-args)
+    (let ((path (desirepath-cache-p-for-advice file)))
+      (if path
+          (progn
+            (desirepath-verbose-macro 5
+	      (message "Desirepath: (advice load) Cache hit %s" file))
+            (apply orig path noerror nomessage nil nil extra-args))
+        (apply orig file noerror nomessage nil nil extra-args)))))
+
+(defun desirepath--load-library-advice (orig library &rest args)
+  "Advice for `load-library': consult `desirepath--cache' first.
+ARGS are passed through unchanged for forward compatibility."
+  (let ((path (desirepath-cache-p-for-advice library)))
+    (if path
+        (progn
+          (desirepath-verbose-macro 5
+            (message "Desirepath: (advice load-library) Cache hit %s" library))
+          (apply orig path args))
+      (apply orig library args))))
+
+(defun desirepath--require-advice (orig feature &optional file noerror)
+  "Advice for `require': consult `desirepath--cache' first.
+NOERROR mirrors `require's third argument (Emacs 24.4+): when non-nil,
+a missing file is not an error.  It is propagated to the original
+`require' so that callers such as `(require \\='foo nil t)' keep working."
+  (unless (symbolp feature)
+    (error "Parameter FEATURE is not a symbol %s"
+           (prin1-to-string feature)))
+  (let ((alist (get 'require 'desirepath-load-list)))
+    (if (or (featurep feature) (assq feature alist))
+        (funcall orig feature file noerror)
+      (let* ((lib (cond
+                   ((stringp file)
+                    (if (string-match "/" file)
+                        (desirepath-expand-file-name file)
+		      file))
+                   (t (symbol-name feature))))
+             (path (desirepath-cache-p-for-advice lib)))
+        (if path
+            (progn
+	      (desirepath-verbose-macro 5
+                (message "Desirepath: (advice require) Cache hit %s" lib))
+	      (unless noerror
+                (desirepath-cache-warn-if-not-exist path))
+	      (push (cons feature path) alist)
+	      (put 'require 'desirepath-load-list alist)
+	      (funcall orig feature path noerror))
+          (funcall orig feature file noerror))))))
+
+(defun desirepath--locate-library-advice (orig library &optional nosuffix
+					       path interactive-call)
+  "Advice for `locate-library': consult `desirepath--cache' first."
+  (interactive
+   (let ((cache (desirepath-emacs-lisp-file-list 'from-cache)))
+     (list
+      (completing-read
+       (format "%slocate library: "
+	       (if cache "(Desirepath cache)" ""))
+       cache nil nil nil))))
+  (unless (stringp library)
+    (error "Parameter LIBRARY is not a string %s"
+           (prin1-to-string library)))
+  (let* ((ok      (desirepath-load-copy-equal-p))
+         (cached  (and ok (desirepath-cache-p library)))
+         (invalid (and ok cached
+		       (desirepath-cache-warn-if-not-exist cached)))
+         (result
+          (cond
+           ((and cached (null invalid))
+            (desirepath-verbose-macro 5
+	      (message "Desirepath: (advice locate-library) Cache hit %s => %s"
+		       library cached))
+            cached)
+           ((and ok (car-safe (desirepath-locate-library library)))
+            (car-safe (desirepath-locate-library library)))
+           (t
+            (funcall orig library nosuffix path interactive-call)))))
+    (when (called-interactively-p 'interactive)
+      (message "%s" (or result
+                        (format "locate-library: %s not found."
+                                (or library "<no filename>")))))
+    result))
 
 (defun desirepath-advice-instantiate ()
-  "Instantiate all advices."
-  ;;  These are put into function to make them delayed and
-  ;;  so that they can be called at apropriate time.
+  "Install advice for `load'/`require'/`locate-library'/etc.
+Idempotent: advice already installed via `advice-add' is skipped.
+Advice on `autoload' is installed only when
+`desirepath--compression-support' is `all' (autoload cookies inside
+.el.gz files only make sense at that level)."
+  (when (eq desirepath--compression-support 'all)
+    (unless (advice-member-p #'desirepath--autoload-advice 'autoload)
+      (advice-add 'autoload :around #'desirepath--autoload-advice)))
+  (unless (advice-member-p #'desirepath--load-advice 'load)
+    (advice-add 'load :around #'desirepath--load-advice))
+  (unless (advice-member-p #'desirepath--load-library-advice 'load-library)
+    (advice-add 'load-library :around #'desirepath--load-library-advice))
+  (unless (advice-member-p #'desirepath--locate-library-advice 'locate-library)
+    (advice-add 'locate-library :around #'desirepath--locate-library-advice))
+  (unless (advice-member-p #'desirepath--require-advice 'require)
+    (advice-add 'require :around #'desirepath--require-advice)))
 
-  (require 'advice)
+(defun desirepath-advice-remove ()
+  "Remove advice installed by `desirepath-advice-instantiate'.
+Idempotent: advice that is not installed is skipped, so calling this
+function twice (e.g. when the user toggles `desirepath-cache-mode' off
+twice) is a no-op."
+  (when (advice-member-p #'desirepath--autoload-advice 'autoload)
+    (advice-remove 'autoload #'desirepath--autoload-advice))
+  (when (advice-member-p #'desirepath--load-advice 'load)
+    (advice-remove 'load #'desirepath--load-advice))
+  (when (advice-member-p #'desirepath--load-library-advice 'load-library)
+    (advice-remove 'load-library #'desirepath--load-library-advice))
+  (when (advice-member-p #'desirepath--locate-library-advice 'locate-library)
+    (advice-remove 'locate-library #'desirepath--locate-library-advice))
+  (when (advice-member-p #'desirepath--require-advice 'require)
+    (advice-remove 'require #'desirepath--require-advice)))
 
-  ;;  I don't know what EFS does, but it certainly must be loaded before we
-  ;;  try to advice `require' or `load' functions. It somehow overwrites the
-  ;;  the original definitions.
-  ;;
-  ;;  efs.el
-  ;;
-  ;;  (efs-overwrite-fn "efs" 'load)
-  ;;  (efs-overwrite-fn "efs" 'require)
-  ;;
-  ;;  See also efs-ovwrt.el
-
-  (when desirepath--xemacs-p
-    (require 'efs))
-
-  ;; ----------------------------------------------------------------------
-  ;; (turn-on-desirepath-cache-mode)
-  ;; (turn-off-desirepath-cache-mode)
-  ;;
-  (defadvice autoload (around desirepath dis)
-    "Use `desirepath--cache' for fast lookup of files."
-    (let* ((file        (ad-get-arg 1))
-	   (path        (desirepath-cache-p-for-advice file)))
-      (when path
-	(ad-set-arg 1 path))
-      ad-do-it))
-
-  ;; ----------------------------------------------------------------------
-  ;; (load FILE &optional NOERROR NOMESSAGE NOSUFFIX MUST-SUFFIX)
-  ;;
-  (defadvice load (around desirepath dis)
-    "Use `desirepath--cache' for fast lookup of files."
-    (let* ((file        (ad-get-arg 0))
-	   (nosuffix    (ad-get-arg 3))
-	   (must-suffix (ad-get-arg 4)))
-      (unless (stringp file)
-	(error "Parameter FILE is not a string %s"
-	       (prin1-to-string file)))
-      (when (and (null nosuffix)
-		 (null must-suffix))
-	;; #todo: this needs better handling. Now we just
-	;; ignore cache if suffix parameters are set.
-	;;
-	;; If optional fourth arg NOSUFFIX is non-nil, don't try adding
-	;; suffixes `.elc' or `.el' to the specified name FILE. If optional
-	;; fifth arg MUST-SUFFIX is non-nil, insist on the suffix `.elc' or
-	;; `.el'; don't accept just FILE unless it ends in one of those
-	;; suffixes or includes a directory name.
-	(let ((path (desirepath-cache-p-for-advice file)))
-	  (when path
-	    (desirepath-verbose-macro 5
-	      (message "Desirepath: (advice load) Cache hit %s" file))
-	    (ad-set-arg 0 path))))
-      ad-do-it))
-
-  ;; ----------------------------------------------------------------------
-  ;;
-  (defadvice load-library (around desirepath dis)
-    "Use `desirepath--cache' for fast lookup of files."
-    (let* ((file  (ad-get-arg 0))
-	   (path  (desirepath-cache-p-for-advice file)))
-      (when path
-	(desirepath-verbose-macro 5
-	  (message "Desirepath: (advice load-library) Cache hit %s" file))
-	(ad-set-arg 0 path))
-      ad-do-it))
-
-  ;; ----------------------------------------------------------------------
-  ;; In Win32 XEmacs 21.2 beta; the this function calls `locate-file' which
-  ;; for some reason breaks if given a absolute file name. The XEmacs
-  ;; docs also say that `locate-file' uses hash table to speed up processing.
-  ;; Hm.
-  ;;
-  ;; There is problem with functions that use (called-interactively-p 'interactive) test, because
-  ;; advice can't pass the information to the underlying function, so any
-  ;; such test inside here won't work.
-  ;;
-  ;; 21.3.1:
-  ;; (locate-library LIBRARY &optional NOSUFFIX PATH INTERACTIVE-CALL)
-  ;;
-  (defadvice locate-library (around desirepath act)
-    "Use `desirepath--cache' for fast lookup of files."
-    (interactive
-     (let ((cache (desirepath-emacs-lisp-file-list 'from-cache)))
-       (list
-	(completing-read
-	 (format "%slocate library: "
-		 (if cache
-		     "(Desirepath cache)"
-		   ""))
-	 cache
-	 nil
-	 nil
-	 nil))))  ;;; Default word
-    (let* ((file  (ad-get-arg 0))
-	   (ok    (desirepath-load-copy-equal-p))
-	   (path  (if (and ok
-			   file)
-		      (desirepath-cache-p file)))
-	   (error (and ok
-		       path
-		       (desirepath-cache-warn-if-not-exist path))))
-      (unless (stringp file)
-	(error "Parameter FILE is not a string %s"
-	       (prin1-to-string file)))
-      (cond
-       ((and path
-	     (null error))
-	(desirepath-verbose-macro 5
-	  (message "Desirepath: (advice locate-library) Cache hit %s => %s"
-		   file path))
-	(setq ad-return-value path))
-       ((and ok
-	     (setq path (car-safe (desirepath-locate-library file))))
-	;;  (fboundp 'locate-file)  ;; Do not continue in XEmacs
-	(setq ad-return-value path))
-       (t
-	ad-do-it))
-      ;; We must simulate in the advice, this interactive behavior, because
-      ;; underlying function does not know it any more, due to advice.
-      (when (called-interactively-p 'interactive)
-	(if path
-	    (message path)
-	  (message "locate-library: %s not found."
-		   (or file "<no filename>"))))))
-
-  ;; ----------------------------------------------------------------------
-  ;;
-  (defadvice require (around desirepath dis)
-    "Use `desirepath--cache' for fast lookup of files.
-Property (get 'require 'desirepath-load-list) contains list
-of required packages: '((feature . path)."
-    (let ((feature  (ad-get-arg 0))
-	  (opt      (ad-get-arg 1))    ;the optional "file" parameter
-	  (alist    (get 'require 'desirepath-load-list))
-	  lib
-	  path)
-      (unless (symbolp feature)
-	(error "Parameter FEATURE is not a symbol %s"
-	       (prin1-to-string feature)))
-      (when (and (not (featurep feature))
-		 ;;  Avoid recursive calls.
-		 (not (assq feature alist)))
-	(setq lib (cond
-		   ((stringp opt)
-		    (if (string-match "/" opt)
-			(desirepath-expand-file-name opt)  opt))
-		   (t
-		    (symbol-name feature))))
-	(when (setq path (desirepath-cache-p-for-advice lib))
-	  (desirepath-verbose-macro 5
-	    (message "Desirepath: (advice require) Cache hit %s" lib))
-	  (desirepath-cache-warn-if-not-exist path)
-	  (push (cons feature path) alist)
-	  (put 'require 'desirepath-load-list alist)
-	  (ad-set-arg 1 path)))
-      ad-do-it))
-
-  ) ;; ############################ END FUNCTION -- end advice instantiate
+;;; ############################ END FUNCTION -- end advice instantiate
 
 ;;;}}}
 ;;;{{{ win32: Unix $HOME directory mounted to PC, like to H: disk
@@ -6923,8 +6486,8 @@ References:
 	(desirepath-verbose-macro 2
 	  (message "Desirepath: [Cygwin] not found from PATH."))
       (cl-pushnew cygwin-path
-	       desirepath--extra-path-root
-	       :test 'string=)
+		  desirepath--extra-path-root
+		  :test 'string=)
       ;;  Be absolutely sure that the path is not added multiple
       ;;  times "f:/unix/cygwin" or "f:/unix/cygwin/" because
       ;;  this would cause reading the same directory twice
@@ -7049,35 +6612,35 @@ Return ((VER . PATH) ..)."
     ;; There is no way we can say which Gnus version is the latest without
     ;; loading the gnus.el and looking inside the file
     (desirepath-with-temp-buffer
-     (dolist (path path-list)
-       ;;  XEmacs installation drop all gnus lisp files directly under:
-       ;;
-       ;;      xemacs-packages/lisp/gnus/
-       ;;
-       ;;  But the Gnus CVS tree contains directory structure
-       ;;
-       ;;      cvs-packages/gnus/lisp/
-       ;;      cvs-packages/gnus/contrib
-       ;;      cvs-packages/gnus/etc
-       ;;
-       (dolist (try '("gnus.el" "lisp/gnus.el"))
-	 (setq file (concat
-		     (desirepath-expand-file-name
-		      (file-name-as-directory path))
-		     try))
-	 (when (file-exists-p file)
-	   (erase-buffer)
-	   ;;  About within 10%  of the file size the defconst can be found
-	   (insert-file-contents file nil 1 10000)
-	   (goto-char (point-min))
-	   (when (re-search-forward
-		  "defconst.*gnus-version.*\"\\([0-9.]+\\)"
-		  nil t)
-	     (push (cons (match-string 1) file)
-		   list)))))
-     (desirepath-verbose-macro 7
-       (message "Desirepath: found Gnus versions %s" (prin1-to-string list)))
-     list)))
+      (dolist (path path-list)
+	;;  XEmacs installation drop all gnus lisp files directly under:
+	;;
+	;;      xemacs-packages/lisp/gnus/
+	;;
+	;;  But the Gnus CVS tree contains directory structure
+	;;
+	;;      cvs-packages/gnus/lisp/
+	;;      cvs-packages/gnus/contrib
+	;;      cvs-packages/gnus/etc
+	;;
+	(dolist (try '("gnus.el" "lisp/gnus.el"))
+	  (setq file (concat
+		      (desirepath-expand-file-name
+		       (file-name-as-directory path))
+		      try))
+	  (when (file-exists-p file)
+	    (erase-buffer)
+	    ;;  About within 10%  of the file size the defconst can be found
+	    (insert-file-contents file nil 1 10000)
+	    (goto-char (point-min))
+	    (when (re-search-forward
+		   "defconst.*gnus-version.*\"\\([0-9.]+\\)"
+		   nil t)
+	      (push (cons (match-string 1) file)
+		    list)))))
+      (desirepath-verbose-macro 7
+	(message "Desirepath: found Gnus versions %s" (prin1-to-string list)))
+      list)))
 
 ;;; ----------------------------------------------------------------------
 ;;;
@@ -7141,24 +6704,26 @@ any N.N version."
 	path)))))
 
 ;;; ----------------------------------------------------------------------
-;;;
+
 (defun desirepath-setup (&optional no-cache force)
   "Add additional directories to `load-path'.
-If `desirepath--cache-expiry-days' is defined, use cached `load-path'
-If cache is too old, read directories under `desirepath--load-path-root'.
+Use the cached `load-path' unless NO-CACHE is non-nil or the cache
+is disabled via `desirepath--cache-enabled'.  If the cache is older
+than `desirepath--cache-expiry-days' (an integer), rebuild it; a nil
+`desirepath--cache-expiry-days' means \"never expire\", not \"disable
+cache\".
 
 Input:
 
-  NO-CACHE   If non-nil, do not use cache but read directories under
-	     `desirepath--load-path-root'.
+  NO-CACHE   If non-nil, ignore the cache and scan
+             `desirepath--load-path-root' directly.
   FORCE      Regenerate cache.
 
 References:
 
-  `desirepath--load-path-function'"
+  `desirepath--load-path-function'."
   (interactive "P")
-  (if (or no-cache
-	  (null desirepath--cache-expiry-days)) ;Cache is not allowed
+  (if (or no-cache (null desirepath--cache-enabled))
       (funcall desirepath--load-path-function)
     (desirepath-cache-setup-main force)))
 
@@ -7174,6 +6739,18 @@ holds the last stored value."
 
 ;;; ----------------------------------------------------------------------
 ;;;
+(defun desirepath--info-ensure-initialized ()
+  "Ensure `Info-directory-list' is populated with the default search path.
+Loads `info.el' lazily and, if `Info-initialize' is available,
+populates `Info-directory-list' from `Info-default-dirs' (INFOPATH and
+built-in defaults).  Safe to call multiple times.  The `fboundp' guard
+protects against Emacs builds where `Info-initialize' is absent (very
+old Emacs, or `info.el' loaded partially)."
+  (require 'info nil t)
+  (unless (bound-and-true-p Info-directory-list)
+    (when (fboundp 'Info-initialize)
+      (Info-initialize))))
+
 (defun desirepath-install ()
   "Install package. There is no uninstall."
   (interactive)
@@ -7181,16 +6758,21 @@ holds the last stored value."
 	(time-a  (current-time))
 	time-b
 	diff)
-    (message "Desirepath: %s BEGIN %s" fid (desirepath-time-string))
-    (message "Desirepath: [INFO] (defmacro) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list)))
-    (message "Desirepath: [INFO] Info-directory-list: %s"
-	     (if (boundp 'Info-directory-list)
-		 (prin1-to-string Info-directory-list)
-	       "<empty>"))
-    (message "Desirepath: [INFO] INFOPATH environment variable: %s"
-	     (or (getenv "INFOPATH")
-		 "no variable"))
+    ;; Ensure `Info-directory-list' is initialized before any use of
+    ;; `desirepath-Info-default-directory-list' or `Info-directory-list'.
+    (desirepath--info-ensure-initialized)
+    (desirepath-verbose-macro 1
+      (message "Desirepath: %s BEGIN %s" fid (desirepath-time-string)))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: [INFO] (defmacro) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list)))
+      (message "Desirepath: [INFO] Info-directory-list: %s"
+	       (if (boundp 'Info-directory-list)
+		   (prin1-to-string Info-directory-list)
+	         "<empty>"))
+      (message "Desirepath: [INFO] INFOPATH environment variable: %s"
+	       (or (getenv "INFOPATH")
+		   "no variable")))
     ;;  Must be before the cygwin check, where cygwin1.dll is
     ;;  searched along `exec-path'
     ;;
@@ -7203,7 +6785,7 @@ holds the last stored value."
     ;;
     ;;  Make sure all are absolute: use forward slash in all path names
     (desirepath-expand-file-name-variable-macro
-     desirepath--load-path-root)
+      desirepath--load-path-root)
     ;;  Suppose user has changed the value since the last time
     ;;  and does M-x load-library RET desirepath.el RET
     ;;  => check if we should regenerate cache or read from disk
@@ -7217,20 +6799,16 @@ holds the last stored value."
     ;;
     ;; Delay defining advises until this point
     ;;
-;    (unless (eq desirepath--compression-support 'none)
-;      (desirepath-advice-instantiate))
+    (turn-on-desirepath-cache-mode-maybe)
     ;;
-    ;;  The autoload statements must be here, because `autoload' is
-    ;;  an advised function. The `fboundp' is just an extra measure,
-    ;;  so that it does not even call the advised-autoload function if
-    ;;  this file is loaded multiple times
+    ;;  Advice is installed by `turn-on-desirepath-cache-mode-maybe'
+    ;;  below, which calls `desirepath-cache-mode' → `desirepath-advice-instantiate'.
+    ;;  Calling `desirepath-advice-instantiate' here as well would be a
+    ;;  no-op after 14.1's idempotency guard, but it is redundant.
     ;;
-    (unless (fboundp 'ti::macrof-version-bug-report)
-      (autoload 'ti::macrof-version-bug-report "tinylib" "" nil 'macro))
     (unless (fboundp 'font-lock-mode)
       (autoload 'font-lock-mode "font-lock"  "" t))
-    (unless (eq desirepath--compression-support 'none)
-      (turn-on-desirepath-cache-mode-maybe))
+    (turn-on-desirepath-cache-mode-maybe)
     ;; (desirepath-install-timer)       ;; Install watchdog to check load-path
     ;;  woman.el, man page viewer for Win32
     ;;  We do not load this, but define autoloads and then add the found
@@ -7252,13 +6830,15 @@ Desirepath: ** Hm, manual pages found, but you do not have woman.el
 	 desirepath--load-path-root)
     (desirepath-Info-default-directory-list-clean)
     (desirepath-exec-path-clean)
-    (message "Desirepath: [INFO] END (defmacro) Info-default-directory-list: %s"
-	     (prin1-to-string (desirepath-Info-default-directory-list)))
-    (message "Desirepath: [INFO] END Info-directory-list: %s"
-	     (if (boundp 'Info-directory-list)
-		 (prin1-to-string Info-directory-list)
-	       "<empty>"))
-    (message "Desirepath: %s END %s" fid (desirepath-time-string))
+    (desirepath-verbose-macro 3
+      (message "Desirepath: [INFO] END (defmacro) Info-default-directory-list: %s"
+	       (prin1-to-string (desirepath-Info-default-directory-list)))
+      (message "Desirepath: [INFO] END Info-directory-list: %s"
+	       (if (boundp 'Info-directory-list)
+		   (prin1-to-string Info-directory-list)
+	         "<empty>")))
+    (desirepath-verbose-macro 1
+      (message "Desirepath: %s END %s" fid (desirepath-time-string)))
     (message (concat (desirepath-cache-status-string)
 		     (format " time %d sec" diff)))))
 
@@ -7300,18 +6880,12 @@ The original value is saved under property `desirepath-saved-value'."
   ;;  it will make loading custom.elc possible. Without it, the
   ;;  defcustomed variables give errors
   (when desirepath--install-flag
-    (when (and (not (desirepath-byte-compile-running-p))
-	       ;;(and (desirepath-byte-compile-running-p)
-	       ;;     (boundp 'xemacs-logo))
-	       ;;
-	       ;; If there is cache and it is valid, do not run
-	       ;; BOOT.
-	       (let ((file (desirepath-cache-file-name)))
-		 (desirepath-cache-file-old-p file)))
-      (desirepath-load-path-initial-value
-       desirepath--core-emacs-load-path-list))))
+    (unless (desirepath-byte-compile-running-p)
+      (when (desirepath-cache-file-needs-bootstrap-p)
+        (message "Desirepath: BOOT cache missing or expired; scanning Emacs install tree.")
+        (desirepath-load-path-initial-value
+         desirepath--core-emacs-load-path-list)))))
 
-(require 'info)
 
 ;;}}}
 ;;{{{ Install load time

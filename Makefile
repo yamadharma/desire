@@ -17,8 +17,13 @@
 EMACS          ?= emacs
 PYTHON         ?= python3
 
-EL_FILES       := desire.el desire-straight.el desire-quelpa.el
+# Package files: byte-compiled and checkdoc-ed.
+EL_FILES       := desire.el desire-straight.el desire-quelpa.el desirepath.el \
+                  ecf-lang.el ecf-mule.el
 ELC_FILES      := $(EL_FILES:.el=.elc)
+
+# Locale resources: loaded via `load', not compiled, not checkdoc-ed.
+MULE_FILES     := ecf-mule/ru.el ecf-mule/utf-8.el ecf-mule/cp1251.el
 TEST_DIR       ?= test
 TEST_FILE      := $(TEST_DIR)/desire-test.el
 
@@ -109,11 +114,43 @@ test:
 	  echo "test: $(TEST_FILE) not found; skipping"; \
 	fi
 
+.PHONY: check-license
+check-license:
+	@expected=$$(grep -o '"license"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | sed 's/.*"\([^"]*\)"$$/\1/'); \
+	if [ -z "$$expected" ]; then \
+	  echo "check-license: package.json has no license field"; exit 1; \
+	fi; \
+	fail=0; \
+	for f in $(EL_FILES); do \
+	  got=$$(grep -m1 'SPDX-License-Identifier:' "$$f" | sed 's/.*SPDX-License-Identifier:[[:space:]]*//; s/[[:space:]]*$$//'); \
+	  if [ "$$got" != "$$expected" ]; then \
+	    echo "$$f: SPDX=$$got, package.json=$$expected"; \
+	    fail=1; \
+	  fi; \
+	done; \
+	if [ "$$fail" = 1 ]; then exit 1; fi; \
+	echo "check-license: OK ($$expected)"
+
+.PHONY: check-mule
+check-mule:
+	@echo "check-mule: verifying $(MULE_FILES) exist and are UTF-8..."
+	@fail=0; \
+	for f in $(MULE_FILES); do \
+	  if [ ! -f "$$f" ]; then \
+	    echo "check-mule: missing $$f"; fail=1; continue; \
+	  fi; \
+	  if ! file "$$f" | grep -q "UTF-8"; then \
+	    echo "check-mule: $$f is not UTF-8"; fail=1; \
+	  fi; \
+	done; \
+	if [ "$$fail" = 1 ]; then exit 1; fi; \
+	echo "check-mule: OK"
+
 # ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
 .PHONY: check
-check: check-version compile checkdoc package-lint test
+check: check-version check-license check-mule compile checkdoc package-lint test
 	@echo
 	@echo "All checks passed."
 
