@@ -1,18 +1,44 @@
-;;; ecf-mule.el --- per-language configuration for desire  -*- lexical-binding: t; coding: utf-8-unix -*-
+;;; ecf-mule.el --- per-language configuration for desire  -*- lexical-binding: t; coding: utf-8-unix; -*-
+
+;; Version:         1.3.0
+;; Package-Requires: ((emacs "24.3"))
+;; Keywords:        convenience, i18n, mule
+;; URL:             https://github.com/yamadharma/desire
+;; SPDX-License-Identifier: GPL-3.0-or-later
+
+;; Copyright (C) 2002-2026 Dmitry S. Kolyabov
+
+;; This file is NOT part of GNU Emacs.  It is, however, distributed
+;; under the same conditions as GNU Emacs, which are as follows:
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 ;;
-;; Loads language-specific configs from `ecf-mule/'.  For LANG=ru_RU.UTF-8
-;; the loader tries, in order:
+;; Loads the most specific language-specific config from `ecf-mule/'.
+;; For `LANG=ru_RU.UTF-8' tries, in order:
 ;;
-;;   ecf-mule/ru.el           (language)
-;;   ecf-mule/utf-8.el        (codeset)
-;;   ecf-mule/ru_ru.el        (language + territory)
-;;   ecf-mule/ru_ru.utf-8.el  (full locale)
+;;   ecf-mule/ru.el
+;;   ecf-mule/utf-8.el
+;;   ecf-mule/ru_ru.el
+;;   ecf-mule/ru_ru.utf-8.el
 ;;
-;; First match wins.  To layer multiple files per language, use the
-;; per-file `desire' mechanism (`desire.ecf' / `desire.ecd/') rather
-;; than an N-match loop.
+;; First existing file wins.  `load' is used (not `require') because
+;; these locale files are configuration snippets, not libraries.
+;;
+;; Exports `desire-mule-lang', `desire-mule-candidates',
+;; `desire-mule-load'.
 
 ;;; Code:
 

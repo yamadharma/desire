@@ -16,10 +16,17 @@ import sys
 from pathlib import Path
 
 TARGETS = [
+    # Package (published, `provide'-ed libraries):
     "desire.el",
     "desire-straight.el",
     "desire-quelpa.el",
     "desirepath.el",
+    "ecf-lang.el",
+    "ecf-mule.el",
+    # Locale resources (loaded via `load' by `ecf-mule.el'):
+    "ecf-mule/ru.el",
+    "ecf-mule/utf-8.el",
+    "ecf-mule/cp1251.el",
 ]
 VERSION_RE = re.compile(r"^(;; Version:[ \t]*)(.+)$", re.MULTILINE)
 
